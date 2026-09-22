@@ -1,0 +1,94 @@
+﻿@page
+@model IndexModel
+
+@{
+    ViewData["Title"] = "Dashboard";
+}
+
+<div class="mb-4">
+    <h1 class="display-5 fw-semibold">SafeSpend</h1>
+    <p class="text-muted">
+        Paycheck-based cash-flow planning
+    </p>
+</div>
+
+<div class="alert alert-info">
+    This dashboard currently uses temporary demonstration data.
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-md-6">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <h2 class="h5 text-muted">Safe to spend now</h2>
+
+                <div class="display-5 fw-bold
+                    @(Model.Forecast.SafeToSpendNowCents >= 0
+                        ? "text-success"
+                        : "text-danger")">
+                    @IndexModel.FormatMoney(
+                        Model.Forecast.SafeToSpendNowCents)
+                </div>
+
+                <div class="mt-3 text-muted">
+                    Through
+                    @Model.NextPaycheckDate.ToString("MMMM d")
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <h2 class="h5 text-muted">
+                    Available from next paycheck
+                </h2>
+
+                <div class="display-5 fw-bold
+                    @(Model.Forecast.AvailableFromNextPaycheckCents >= 0
+                        ? "text-success"
+                        : "text-danger")">
+                    @IndexModel.FormatMoney(
+                        Model.Forecast.AvailableFromNextPaycheckCents)
+                </div>
+
+                <div class="mt-3 text-muted">
+                    After upcoming bills and safety cushion
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header">
+        <strong>Upcoming expenses</strong>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-striped mb-0">
+            <thead>
+                <tr>
+                    <th>Description</th>
+                    <th>Due date</th>
+                    <th class="text-end">Amount</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                @foreach (var occurrence in Model.UpcomingOccurrences)
+                {
+                    <tr>
+                        <td>@occurrence.Name</td>
+                        <td>@occurrence.Date.ToString("MMM d, yyyy")</td>
+                        <td class="text-end">
+                            @IndexModel.FormatMoney(
+                                occurrence.AmountCents)
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

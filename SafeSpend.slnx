@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="SafeSpend.Tests/SafeSpend.Tests.csproj" />
+  <Project Path="SafeSpend.Web/SafeSpend.Web.csproj" />
+</Solution>
