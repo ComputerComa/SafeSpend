@@ -1,0 +1,251 @@
+@page
+@model SafeSpend.Web.Pages.Plaid.ConnectModel
+@{
+    ViewData["Title"] = "Connect Plaid";
+}
+
+<div class="mb-4">
+    <h1>Connect a bank</h1>
+    <p class="text-muted">
+        Connect a Sandbox institution through Plaid Link.
+    </p>
+</div>
+
+@if (Model.IsConnected)
+{
+    <div class="alert alert-success">
+        Plaid is connected.
+        Item ID: <code>@Model.ItemId</code>
+    </div>
+
+    <button id="sync-transactions"
+            class="btn btn-outline-primary mb-4"
+            type="button">
+        Sync transactions
+    </button>
+
+    @if (Model.AccountLoadError is not null)
+    {
+        <div class="alert alert-danger" role="alert">
+            @Model.AccountLoadError
+        </div>
+    }
+    else if (Model.Accounts.Count == 0)
+    {
+        <div class="alert alert-info" role="status">
+            No checking or savings accounts were returned by Plaid.
+        </div>
+    }
+    else
+    {
+        <section aria-labelledby="connected-accounts-heading" class="mb-4">
+            <h2 id="connected-accounts-heading" class="h4">
+                Connected checking and savings accounts
+            </h2>
+
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead>
+                        <tr>
+                            <th scope="col">Account</th>
+                            <th scope="col">Type</th>
+                            <th scope="col">Available</th>
+                            <th scope="col">Current</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var account in Model.Accounts)
+                    {
+                        <tr>
+                            <th scope="row">
+                                @account.Name
+                                @if (!string.IsNullOrWhiteSpace(account.Mask))
+                                {
+                                    <span class="text-muted">
+                                        ····@account.Mask
+                                    </span>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(account.OfficialName) &&
+                                    !string.Equals(
+                                        account.Name,
+                                        account.OfficialName,
+                                        StringComparison.Ordinal))
+                                {
+                                    <small class="d-block text-muted">
+                                        @account.OfficialName
+                                    </small>
+                                }
+                            </th>
+                            <td>@account.Subtype</td>
+                            <td>
+                                @(account.AvailableBalance?.ToString("C") ?? "—")
+                                <span class="text-muted">@account.CurrencyCode</span>
+                            </td>
+                            <td>
+                                @(account.CurrentBalance?.ToString("C") ?? "—")
+                                <span class="text-muted">@account.CurrencyCode</span>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+}
+
+<form id="plaid-antiforgery-form" method="post">
+    @Html.AntiForgeryToken()
+</form>
+
+<button id="connect-plaid"
+        class="btn btn-primary"
+        type="button">
+    Connect with Plaid
+</button>
+
+<div id="plaid-status"
+     class="alert mt-3 d-none"
+     role="alert">
+</div>
+
+@section Scripts {
+    <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+
+    <script>
+        (() => {
+            const connectButton =
+                document.getElementById("connect-plaid");
+
+            const syncButton =
+                document.getElementById("sync-transactions");
+
+            const statusBox =
+                document.getElementById("plaid-status");
+
+            const antiForgeryToken =
+                document.querySelector(
+                    '#plaid-antiforgery-form input[name="__RequestVerificationToken"]'
+                ).value;
+
+            function showStatus(message, kind) {
+                statusBox.textContent = message;
+                statusBox.className = `alert alert-${kind} mt-3`;
+            }
+
+            async function post(handler, body) {
+                const response = await fetch(
+                    `@Url.Page("/Plaid/Connect")?handler=${handler}`,
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "RequestVerificationToken": antiForgeryToken
+                        },
+                        body: body === undefined
+                            ? null
+                            : JSON.stringify(body)
+                    });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        result.error ?? "The Plaid request failed."
+                    );
+                }
+
+                return result;
+            }
+
+            connectButton.addEventListener("click", async () => {
+                connectButton.disabled = true;
+                showStatus("Creating Plaid Link session…", "info");
+
+                try {
+                    const tokenResult =
+                        await post("CreateLinkToken");
+
+                    const handler = Plaid.create({
+                        token: tokenResult.linkToken,
+
+                        onSuccess: async (publicToken) => {
+                            showStatus(
+                                "Bank connected. Exchanging token…",
+                                "info"
+                            );
+
+                            try {
+                                const exchangeResult =
+                                    await post(
+                                        "ExchangePublicToken",
+                                        {
+                                            publicToken
+                                        }
+                                    );
+
+                                showStatus(
+                                    `Plaid connection complete. Item: ${exchangeResult.itemId}`,
+                                    "success"
+                                );
+
+                                connectButton.textContent =
+                                    "Connected";
+
+                                handler.destroy();
+                                window.location.reload();
+                            } catch (error) {
+                                showStatus(error.message, "danger");
+                                connectButton.disabled = false;
+                            }
+                        },
+
+                        onExit: (error) => {
+                            if (error) {
+                                showStatus(
+                                    `${error.error_code}: ${error.error_message}`,
+                                    "danger"
+                                );
+                            } else {
+                                showStatus(
+                                    "Plaid Link was closed.",
+                                    "secondary"
+                                );
+                            }
+
+                            connectButton.disabled = false;
+                            handler.destroy();
+                        }
+                    });
+
+                    handler.open();
+                } catch (error) {
+                    showStatus(error.message, "danger");
+                    connectButton.disabled = false;
+                }
+            });
+
+            if (syncButton) {
+                syncButton.addEventListener("click", async () => {
+                    syncButton.disabled = true;
+                    showStatus("Syncing transactions…", "info");
+
+                    try {
+                        const syncResult =
+                            await post("SyncTransactions");
+
+                        showStatus(
+                            `Synced ${syncResult.added} new, ` +
+                            `${syncResult.modified} updated, and ` +
+                            `${syncResult.removed} removed transactions.`,
+                            "success");
+                    } catch (error) {
+                        showStatus(error.message, "danger");
+                    } finally {
+                        syncButton.disabled = false;
+                    }
+                });
+            }
+        })();
+    </script>
+}
