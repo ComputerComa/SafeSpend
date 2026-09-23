@@ -1,7 +1,9 @@
+using System.Globalization;
 using Going.Plaid;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Localization;
 using Microsoft.EntityFrameworkCore;
 using SafeSpend.Web.Services.Forecasting;
 using SafeSpend.Web.Services.Identity;
@@ -15,6 +17,13 @@ builder.Configuration.AddUserSecrets<Program>(optional: true);
 
 // Add services to the container.
 builder.Services.AddRazorPages();
+builder.Services.Configure<RequestLocalizationOptions>(options =>
+{
+    var culture = CultureInfo.GetCultureInfo("en-US");
+    options.DefaultRequestCulture = new RequestCulture(culture);
+    options.SupportedCultures = [culture];
+    options.SupportedUICultures = [culture];
+});
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders =
@@ -131,6 +140,7 @@ if (builder.Configuration.GetValue<bool>("SafeSpend:BehindProxy"))
     app.UseForwardedHeaders();
 }
 
+app.UseRequestLocalization();
 app.UseHttpsRedirection();
 
 app.UseRouting();

@@ -42,6 +42,13 @@ reverse proxy must terminate HTTPS and forward `/api/plaid/webhook` to the
 local application port. The configured `SafeSpend__PlaidWebhookUrl` must be
 the public HTTPS URL, not the local `127.0.0.1` address.
 
+For initial LAN-only setup, set `ASPNETCORE_URLS` to
+`http://0.0.0.0:5080` and set `AllowedHosts` to the LXC address plus local
+hosts, for example `192.168.1.50;localhost;127.0.0.1`. Restart the service,
+then browse to `http://192.168.1.50:5080/Account/Setup`. Replace the temporary
+LAN settings with the reverse-proxy hostname before exposing the application,
+and set `SafeSpend__BehindProxy=true` only when that proxy is active.
+
 The deploy scripts default to `ComputerComa/SafeSpend`; change
 `SAFESPEND_REPOSITORY` if the repository is moved or forked.
 
