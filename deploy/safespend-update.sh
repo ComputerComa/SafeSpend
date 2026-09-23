@@ -82,6 +82,20 @@ fi
 mv "$staging_directory" "$release_directory"
 chown -R "$app_user:$app_group" "$release_directory"
 
+# Keep the host-level service and log rotation policy in step with the
+# application release. They are outside the versioned application directory.
+if [[ -f "$release_directory/deploy/safespend.service" ]]; then
+    install -o root -g root -m 0644 \
+        "$release_directory/deploy/safespend.service" \
+        "/etc/systemd/system/$service_name.service"
+fi
+if [[ -f "$release_directory/deploy/safespend.logrotate" ]]; then
+    install -o root -g root -m 0644 \
+        "$release_directory/deploy/safespend.logrotate" \
+        /etc/logrotate.d/safespend
+fi
+systemctl daemon-reload
+
 previous_target=""
 if [[ -L "$current_link" ]]; then
     previous_target="$(readlink -f "$current_link")"

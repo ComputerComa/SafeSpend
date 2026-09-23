@@ -1,0 +1,10 @@
+/var/log/safespend/*.log {
+    daily
+    maxsize 50M
+    rotate 14
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+}

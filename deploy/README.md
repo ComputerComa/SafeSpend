@@ -3,12 +3,17 @@
 The GitHub Actions workflow creates a framework-dependent release ZIP when a
 tag such as `v1.0.0` is pushed. It publishes both a versioned asset and
 `SafeSpend-latest.zip`, each with a SHA-256 checksum. The LXC needs the .NET 10
-ASP.NET Core runtime, `curl`, `unzip`, and `systemd`.
+ASP.NET Core runtime, `curl`, `unzip`, `logrotate`, and `systemd`.
 
 The application data and Data Protection keys live in `/var/lib/safespend`.
 That directory is outside the versioned release folders, so updating the
 application does not reset the administrator account, Plaid connection, or
 encrypted access-token data.
+
+Application output is written to `/var/log/safespend/stdout.log` and
+`/var/log/safespend/stderr.log`. The installer adds a logrotate policy that
+rotates them daily or at 50 MB, retains 14 rotations, and compresses older
+files.
 
 ## Initial installation
 

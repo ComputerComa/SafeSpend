@@ -6,6 +6,11 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
+if ! command -v logrotate >/dev/null 2>&1; then
+    echo "logrotate is required. Install it before running this installer." >&2
+    exit 1
+fi
+
 script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 app_root="${SAFESPEND_APP_ROOT:-/opt/safespend}"
 app_user="${SAFESPEND_USER:-safespend}"
@@ -36,6 +41,9 @@ install -o root -g root -m 0755 \
 install -o root -g root -m 0644 \
     "$script_directory/safespend.service" \
     "/etc/systemd/system/$service_name.service"
+install -o root -g root -m 0644 \
+    "$script_directory/safespend.logrotate" \
+    /etc/logrotate.d/safespend
 
 if [[ ! -f /etc/safespend/update.env ]]; then
     install -o root -g root -m 0600 \
