@@ -26,7 +26,7 @@ The current flow is:
 12. Production uses `App_Data/Production` for its Identity database, application database, and Data Protection keys, keeping the existing Sandbox files under `App_Data` separate.
 13. A hosted worker performs an initial sync, then periodic cursor-based transaction syncs (60 minutes by default). Webhook-triggered syncs are queued and deduplicated, while per-user sync coordination prevents cursor races with manual syncs.
 14. `/api/plaid/webhook` verifies Plaid's `Plaid-Verification` ES256 signature and body hash using `/webhook_verification_key/get`. Transaction update webhooks queue a sync; Item recovery webhooks persist a non-secret `ActionRequired` status. Plaid Link uses update mode for an existing connection so the user can repair it.
-15. `.github/workflows/release.yml` publishes a versioned application ZIP and a `SafeSpend-latest.zip` asset on `v*` tag pushes. The `deploy/` directory contains the LXC installer, systemd unit, persistent-data configuration, checksum-verified updater, and automatic rollback.
+15. `.github/workflows/release.yml` publishes a versioned application ZIP and a `SafeSpend-latest.zip` asset on `v*` tag pushes. The root `install.sh` is a curl-pipe bootstrap; `deploy/` contains the systemd unit, persistent-data configuration, checksum-verified updater, and automatic rollback.
 
 ## Important implementation locations
 

@@ -11,6 +11,12 @@ app_root="${SAFESPEND_APP_ROOT:-/opt/safespend}"
 app_user="${SAFESPEND_USER:-safespend}"
 app_group="${SAFESPEND_GROUP:-$app_user}"
 service_name="${SAFESPEND_SERVICE:-safespend}"
+repository="${SAFESPEND_REPOSITORY:-ComputerComa/SafeSpend}"
+
+if [[ ! "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    echo "SAFESPEND_REPOSITORY must look like owner/repository." >&2
+    exit 1
+fi
 
 if ! id "$app_user" >/dev/null 2>&1; then
     useradd --system --home-dir /var/lib/safespend \
@@ -34,6 +40,8 @@ install -o root -g root -m 0644 \
 if [[ ! -f /etc/safespend/update.env ]]; then
     install -o root -g root -m 0600 \
         "$script_directory/safespend-update.env.example" \
+        /etc/safespend/update.env
+    sed -i "s#^SAFESPEND_REPOSITORY=.*#SAFESPEND_REPOSITORY=$repository#" \
         /etc/safespend/update.env
     echo "Edit /etc/safespend/update.env, then run safespend-update."
 fi

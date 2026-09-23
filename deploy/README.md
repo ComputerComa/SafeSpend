@@ -12,16 +12,25 @@ encrypted access-token data.
 
 ## Initial installation
 
-Copy this `deploy` directory to the LXC, then run:
+From the LXC, run the bootstrap installer:
 
 ```bash
-sudo ./install-safespend.sh
+curl -fsSL https://raw.githubusercontent.com/ComputerComa/SafeSpend/master/install.sh | sudo bash
+```
+
+It downloads the latest release, verifies its checksum, and installs the
+service and updater. Then configure the LXC:
+
+```bash
 sudo editor /etc/safespend/update.env
 sudo editor /etc/safespend/safespend.env
 sudo chmod 600 /etc/safespend/*.env
 sudo safespend-update
 sudo systemctl status safespend
 ```
+
+The same installer can be run from a checked-out repository with
+`sudo ./install.sh`.
 
 Set `AllowedHosts` to the public hostname used by the reverse proxy. The
 reverse proxy must terminate HTTPS and forward `/api/plaid/webhook` to the

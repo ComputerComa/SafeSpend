@@ -51,6 +51,7 @@ jobs:
           # Deployment helpers contain no credentials and make the release
           # self-documenting when it is downloaded onto the LXC host.
           cp -R deploy "$publish_dir/deploy"
+          cp install.sh "$publish_dir/install.sh"
 
           archive_name="SafeSpend-${GITHUB_REF_NAME}.zip"
           latest_archive_name="SafeSpend-latest.zip"
