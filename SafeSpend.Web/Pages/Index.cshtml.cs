@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using SafeSpend.Web.Services.Forecasting;
@@ -5,13 +6,13 @@ using SafeSpend.Web.Services.Plaid;
 
 namespace SafeSpend.Web.Pages;
 
+[Authorize]
 public sealed class IndexModel : PageModel
 {
     private readonly PaycheckForecastService _forecastService;
     private readonly CashFlowScheduleService _scheduleService;
     private readonly IForecastScheduleStore _scheduleStore;
     private readonly PlaidLinkService _plaidLinkService;
-    private readonly PlaidConnectionState _connectionState;
     private readonly ILogger<IndexModel> _logger;
 
     public IndexModel(
@@ -19,14 +20,12 @@ public sealed class IndexModel : PageModel
         CashFlowScheduleService scheduleService,
         IForecastScheduleStore scheduleStore,
         PlaidLinkService plaidLinkService,
-        PlaidConnectionState connectionState,
         ILogger<IndexModel> logger)
     {
         _forecastService = forecastService;
         _scheduleService = scheduleService;
         _scheduleStore = scheduleStore;
         _plaidLinkService = plaidLinkService;
-        _connectionState = connectionState;
         _logger = logger;
     }
 
@@ -37,9 +36,12 @@ public sealed class IndexModel : PageModel
     public IReadOnlyList<BillSchedule> BillSchedules
     { get; private set; } = [];
 
-    public bool IsPlaidConnected => _connectionState.IsConnected;
+    public bool IsPlaidConnected { get; private set; }
 
     public IReadOnlyList<PlaidTransactionSummary> RecentTransactions
+    { get; private set; } = [];
+
+    public IReadOnlyList<PlaidAccountSummary> ConnectedAccounts
     { get; private set; } = [];
 
     public string? PlaidDataError { get; private set; }
@@ -51,82 +53,61 @@ public sealed class IndexModel : PageModel
     public DateOnly? NextPaycheckDate =>
         PaycheckSchedule?.NextPaycheckDate;
 
+    public long? CurrentBalanceCents { get; private set; }
+
     public IReadOnlyList<CashFlowOccurrence> UpcomingOccurrences
     { get; private set; } = [];
 
-    [BindProperty]
-    public PaycheckScheduleInput PaycheckInput { get; set; } = new();
+    public long UpcomingTotalCents =>
+        UpcomingOccurrences.Sum(occurrence => occurrence.AmountCents);
 
-    [BindProperty]
-    public BillScheduleInput BillInput { get; set; } = new();
+    public bool NeedsSetup =>
+        !IsPlaidConnected || PaycheckSchedule is null;
+
+    public string SetupMessage
+    {
+        get
+        {
+            if (!IsPlaidConnected && PaycheckSchedule is null)
+            {
+                return "Connect a bank and add your paycheck schedule to start your forecast.";
+            }
+
+            if (!IsPlaidConnected)
+            {
+                return "Connect a bank to calculate your forecast from your current balance.";
+            }
+
+            return "Add your paycheck schedule to calculate your forecast.";
+        }
+    }
 
     public async Task OnGetAsync()
     {
-        await LoadDashboardAsync(populateInputs: true);
+        await LoadDashboardAsync();
     }
 
-    public async Task<IActionResult> OnPostSavePaycheckScheduleAsync()
+    public async Task<IActionResult> OnPostSyncTransactionsAsync()
     {
-        if (!TryCreatePaycheckSchedule(out var schedule))
-        {
-            await LoadDashboardAsync(populateInputs: false);
-            return Page();
-        }
-
         try
         {
-            await _scheduleStore.SavePaycheckScheduleAsync(schedule);
+            await _plaidLinkService.SyncTransactionsAsync();
         }
         catch (Exception exception)
         {
             _logger.LogError(
-                "Unable to save paycheck schedule. Error type: {ErrorType}",
+                "Unable to sync Plaid transactions from the dashboard. Error type: {ErrorType}",
                 exception.GetType().Name);
-            ScheduleError = "The paycheck schedule could not be saved.";
-            await LoadDashboardAsync(populateInputs: false);
+            PlaidDataError =
+                "Transactions could not be synced right now.";
+            await LoadDashboardAsync();
             return Page();
         }
 
         return RedirectToPage();
     }
 
-    public async Task<IActionResult> OnPostAddBillAsync()
-    {
-        if (!TryCreateBillSchedule(out var schedule))
-        {
-            await LoadDashboardAsync(populateInputs: false);
-            return Page();
-        }
-
-        try
-        {
-            await _scheduleStore.AddBillScheduleAsync(schedule);
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(
-                "Unable to save bill schedule. Error type: {ErrorType}",
-                exception.GetType().Name);
-            ScheduleError = "The bill could not be saved.";
-            await LoadDashboardAsync(populateInputs: false);
-            return Page();
-        }
-
-        return RedirectToPage();
-    }
-
-    public async Task<IActionResult> OnPostDeleteBillAsync(int id)
-    {
-        if (id <= 0)
-        {
-            return BadRequest();
-        }
-
-        await _scheduleStore.DeleteBillScheduleAsync(id);
-        return RedirectToPage();
-    }
-
-    private async Task LoadDashboardAsync(bool populateInputs)
+    private async Task LoadDashboardAsync()
     {
         try
         {
@@ -134,11 +115,6 @@ public sealed class IndexModel : PageModel
                 .GetPaycheckScheduleAsync();
             BillSchedules = await _scheduleStore
                 .GetBillSchedulesAsync();
-
-            if (populateInputs)
-            {
-                PopulateInputs();
-            }
         }
         catch (Exception exception)
         {
@@ -149,9 +125,12 @@ public sealed class IndexModel : PageModel
             return;
         }
 
+        IsPlaidConnected = await _plaidLinkService.IsConnectedAsync();
+
         if (IsPlaidConnected)
         {
             await LoadPlaidDataAsync();
+            TryGetAvailableBalanceCents(out _);
         }
 
         if (PaycheckSchedule is null)
@@ -235,9 +214,6 @@ public sealed class IndexModel : PageModel
         }
     }
 
-    public IReadOnlyList<PlaidAccountSummary> ConnectedAccounts
-    { get; private set; } = [];
-
     private bool TryGetAvailableBalanceCents(out long balanceCents)
     {
         var balances = ConnectedAccounts
@@ -255,166 +231,7 @@ public sealed class IndexModel : PageModel
         balanceCents = checked((long)Math.Round(
             total * 100m,
             MidpointRounding.AwayFromZero));
-        return true;
-    }
-
-    private void PopulateInputs()
-    {
-        if (PaycheckSchedule is not null)
-        {
-            PaycheckInput = new PaycheckScheduleInput
-            {
-                NextPaycheckDate = PaycheckSchedule.NextPaycheckDate,
-                FollowingPaycheckDate = PaycheckSchedule.FollowingPaycheckDate,
-                AmountDollars = PaycheckSchedule.AmountCents / 100m,
-                CushionDollars = PaycheckSchedule.CushionCents / 100m
-            };
-        }
-    }
-
-    private bool TryCreatePaycheckSchedule(
-        out PaycheckSchedule schedule)
-    {
-        schedule = null!;
-        var valid = true;
-
-        if (!PaycheckInput.NextPaycheckDate.HasValue)
-        {
-            ModelState.AddModelError(
-                "PaycheckInput.NextPaycheckDate",
-                "Enter the next paycheck date.");
-            valid = false;
-        }
-
-        if (!PaycheckInput.FollowingPaycheckDate.HasValue)
-        {
-            ModelState.AddModelError(
-                "PaycheckInput.FollowingPaycheckDate",
-                "Enter the following paycheck date.");
-            valid = false;
-        }
-
-        if (PaycheckInput.NextPaycheckDate.HasValue &&
-            PaycheckInput.FollowingPaycheckDate.HasValue &&
-            PaycheckInput.FollowingPaycheckDate <=
-            PaycheckInput.NextPaycheckDate)
-        {
-            ModelState.AddModelError(
-                "PaycheckInput.FollowingPaycheckDate",
-                "The following paycheck must be after the next paycheck.");
-            valid = false;
-        }
-
-        if (!TryConvertDollarsToCents(
-                PaycheckInput.AmountDollars,
-                allowZero: false,
-                out var amountCents))
-        {
-            ModelState.AddModelError(
-                "PaycheckInput.AmountDollars",
-                "Enter a paycheck amount with at most two decimal places.");
-            valid = false;
-        }
-
-        if (!TryConvertDollarsToCents(
-                PaycheckInput.CushionDollars,
-                allowZero: true,
-                out var cushionCents))
-        {
-            ModelState.AddModelError(
-                "PaycheckInput.CushionDollars",
-                "Enter a safety cushion with at most two decimal places.");
-            valid = false;
-        }
-
-        if (!valid)
-        {
-            return false;
-        }
-
-        schedule = new PaycheckSchedule(
-            PaycheckInput.NextPaycheckDate!.Value,
-            PaycheckInput.FollowingPaycheckDate!.Value,
-            amountCents,
-            cushionCents);
-        return true;
-    }
-
-    private bool TryCreateBillSchedule(out BillSchedule schedule)
-    {
-        schedule = null!;
-        var valid = true;
-
-        if (string.IsNullOrWhiteSpace(BillInput.Name))
-        {
-            ModelState.AddModelError(
-                "BillInput.Name",
-                "Enter a bill name.");
-            valid = false;
-        }
-
-        if (!BillInput.NextDueDate.HasValue)
-        {
-            ModelState.AddModelError(
-                "BillInput.NextDueDate",
-                "Enter the next due date.");
-            valid = false;
-        }
-
-        if (!TryConvertDollarsToCents(
-                BillInput.AmountDollars,
-                allowZero: false,
-                out var amountCents))
-        {
-            ModelState.AddModelError(
-                "BillInput.AmountDollars",
-                "Enter a bill amount with at most two decimal places.");
-            valid = false;
-        }
-
-        if (!Enum.IsDefined(BillInput.Frequency))
-        {
-            ModelState.AddModelError(
-                "BillInput.Frequency",
-                "Choose a bill frequency.");
-            valid = false;
-        }
-
-        if (!valid)
-        {
-            return false;
-        }
-
-        schedule = new BillSchedule(
-            0,
-            BillInput.Name.Trim(),
-            BillInput.NextDueDate!.Value,
-            amountCents,
-            BillInput.Frequency);
-        return true;
-    }
-
-    private static bool TryConvertDollarsToCents(
-        decimal? dollars,
-        bool allowZero,
-        out long cents)
-    {
-        cents = 0;
-
-        if (!dollars.HasValue ||
-            (allowZero ? dollars.Value < 0 : dollars.Value <= 0))
-        {
-            return false;
-        }
-
-        var value = dollars.Value * 100m;
-        if (value != decimal.Truncate(value) ||
-            value > long.MaxValue)
-        {
-            return false;
-        }
-
-        cents = (long)value;
+        CurrentBalanceCents = balanceCents;
         return true;
     }
 
@@ -448,27 +265,5 @@ public sealed class IndexModel : PageModel
         };
 
         return $"{sign}{Math.Abs(amount.Value):C}";
-    }
-
-    public sealed class PaycheckScheduleInput
-    {
-        public DateOnly? NextPaycheckDate { get; set; }
-
-        public DateOnly? FollowingPaycheckDate { get; set; }
-
-        public decimal? AmountDollars { get; set; }
-
-        public decimal? CushionDollars { get; set; }
-    }
-
-    public sealed class BillScheduleInput
-    {
-        public string Name { get; set; } = string.Empty;
-
-        public DateOnly? NextDueDate { get; set; }
-
-        public decimal? AmountDollars { get; set; }
-
-        public BillFrequency Frequency { get; set; } = BillFrequency.Monthly;
     }
 }

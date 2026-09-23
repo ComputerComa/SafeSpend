@@ -10,4 +10,6 @@ public interface IPlaidTransactionStore
 
     Task<IReadOnlyList<PlaidTransactionSummary>> GetTransactionsAsync(
         string itemId);
+
+    Task DeleteAsync(string itemId);
 }

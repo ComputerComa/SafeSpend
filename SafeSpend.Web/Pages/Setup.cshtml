@@ -1,0 +1,288 @@
+@page
+@model SetupModel
+
+@{
+    ViewData["Title"] = "Setup";
+}
+
+<div class="mb-4">
+    <p class="text-uppercase text-muted small fw-semibold mb-1">
+        SafeSpend setup
+    </p>
+    <h1 class="display-6 fw-semibold mb-1">Connect and configure</h1>
+    <p class="text-muted mb-0">
+        Keep your bank connection and cash-flow schedules here.
+    </p>
+</div>
+
+@if (Model.ScheduleError is not null)
+{
+    <div class="alert alert-danger" role="alert">
+        @Model.ScheduleError
+    </div>
+}
+
+@if (Model.PlaidError is not null)
+{
+    <div class="alert alert-warning" role="alert">
+        @Model.PlaidError
+    </div>
+}
+
+<div class="row g-4 mb-4">
+    <div class="col-lg-5">
+        <section class="card shadow-sm h-100">
+            <div class="card-header d-flex justify-content-between
+                        align-items-center">
+                <strong>Bank connection</strong>
+                @if (Model.IsPlaidConnected)
+                {
+                    @if (Model.ConnectionStatus == "ActionRequired")
+                    {
+                        <span class="badge text-bg-warning">Needs attention</span>
+                    }
+                    else
+                    {
+                        <span class="badge text-bg-success">Connected</span>
+                    }
+                }
+                else
+                {
+                    <span class="badge text-bg-secondary">Not connected</span>
+                }
+            </div>
+            <div class="card-body">
+                @if (!Model.IsPlaidConnected)
+                {
+                    <p class="text-muted">
+                        Connect Plaid to load checking and savings balances and
+                        import transactions.
+                    </p>
+                    <a class="btn btn-primary" asp-page="/Plaid/Connect">
+                        Connect a bank
+                    </a>
+                }
+                else
+                {
+                    @if (Model.ConnectionStatus == "ActionRequired")
+                    {
+                        <div class="alert alert-warning">
+                            Plaid needs attention. Open the connection page to
+                            repair the bank connection.
+                        </div>
+                    }
+                    <p class="mb-1">
+                        @Model.Accounts.Count account(s) available for SafeSpend.
+                    </p>
+                    <p class="text-muted small">
+                        Manage accounts or sync the latest transactions from the
+                        Plaid connection page.
+                    </p>
+                    <a class="btn btn-outline-primary"
+                       asp-page="/Plaid/Connect">
+                        Manage Plaid connection
+                    </a>
+                }
+            </div>
+        </section>
+    </div>
+
+    <div class="col-lg-7">
+        <section class="card shadow-sm h-100">
+            <div class="card-header">
+                <strong>Paycheck schedule</strong>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">
+                    SafeSpend uses these dates and amounts to calculate what is
+                    available between paychecks.
+                </p>
+                <form method="post" asp-page-handler="SavePaycheckSchedule">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label asp-for="PaycheckInput.NextPaycheckDate"
+                                   class="form-label">
+                                Next paycheck
+                            </label>
+                            <input asp-for="PaycheckInput.NextPaycheckDate"
+                                   type="date"
+                                   class="form-control" />
+                            <span asp-validation-for="PaycheckInput.NextPaycheckDate"
+                                  class="text-danger"></span>
+                        </div>
+                        <div class="col-md-6">
+                            <label asp-for="PaycheckInput.FollowingPaycheckDate"
+                                   class="form-label">
+                                Following paycheck
+                            </label>
+                            <input asp-for="PaycheckInput.FollowingPaycheckDate"
+                                   type="date"
+                                   class="form-control" />
+                            <span asp-validation-for="PaycheckInput.FollowingPaycheckDate"
+                                  class="text-danger"></span>
+                        </div>
+                        <div class="col-md-6">
+                            <label asp-for="PaycheckInput.AmountDollars"
+                                   class="form-label">
+                                Paycheck amount
+                            </label>
+                            <div class="input-group">
+                                <span class="input-group-text">$</span>
+                                <input asp-for="PaycheckInput.AmountDollars"
+                                       type="number"
+                                       min="0.01"
+                                       step="0.01"
+                                       class="form-control" />
+                            </div>
+                            <span asp-validation-for="PaycheckInput.AmountDollars"
+                                  class="text-danger"></span>
+                        </div>
+                        <div class="col-md-6">
+                            <label asp-for="PaycheckInput.CushionDollars"
+                                   class="form-label">
+                                Safety cushion
+                            </label>
+                            <div class="input-group">
+                                <span class="input-group-text">$</span>
+                                <input asp-for="PaycheckInput.CushionDollars"
+                                       type="number"
+                                       min="0"
+                                       step="0.01"
+                                       class="form-control" />
+                            </div>
+                            <span asp-validation-for="PaycheckInput.CushionDollars"
+                                  class="text-danger"></span>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary mt-3" type="submit">
+                        Save paycheck schedule
+                    </button>
+                </form>
+            </div>
+        </section>
+    </div>
+</div>
+
+<section class="card shadow-sm">
+    <div class="card-header">
+        <strong>Bill schedule</strong>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small">
+            Add recurring and one-time bills that should appear in the forecast.
+        </p>
+
+        <form method="post" asp-page-handler="AddBill">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label asp-for="BillInput.Name" class="form-label">
+                        Bill name
+                    </label>
+                    <input asp-for="BillInput.Name"
+                           class="form-control"
+                           placeholder="Rent" />
+                    <span asp-validation-for="BillInput.Name"
+                          class="text-danger"></span>
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="BillInput.NextDueDate"
+                           class="form-label">
+                        Next due
+                    </label>
+                    <input asp-for="BillInput.NextDueDate"
+                           type="date"
+                           class="form-control" />
+                    <span asp-validation-for="BillInput.NextDueDate"
+                          class="text-danger"></span>
+                </div>
+                <div class="col-md-2">
+                    <label asp-for="BillInput.AmountDollars"
+                           class="form-label">
+                        Amount
+                    </label>
+                    <input asp-for="BillInput.AmountDollars"
+                           type="number"
+                           min="0.01"
+                           step="0.01"
+                           class="form-control" />
+                    <span asp-validation-for="BillInput.AmountDollars"
+                          class="text-danger"></span>
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="BillInput.Frequency"
+                           class="form-label">
+                        Frequency
+                    </label>
+                    <select asp-for="BillInput.Frequency"
+                            class="form-select">
+                        @foreach (var frequency in
+                            Enum.GetValues<BillFrequency>())
+                        {
+                            <option value="@frequency">
+                                @SetupModel.FormatFrequency(frequency)
+                            </option>
+                        }
+                    </select>
+                    <span asp-validation-for="BillInput.Frequency"
+                          class="text-danger"></span>
+                </div>
+            </div>
+
+            <button class="btn btn-outline-primary mt-3" type="submit">
+                Add bill
+            </button>
+        </form>
+
+        @if (Model.BillSchedules.Count == 0)
+        {
+            <p class="text-muted mt-4 mb-0">
+                No bills have been added yet.
+            </p>
+        }
+        else
+        {
+            <div class="table-responsive mt-4">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Bill</th>
+                            <th>Next due</th>
+                            <th>Frequency</th>
+                            <th class="text-end">Amount</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var bill in Model.BillSchedules)
+                    {
+                        <tr>
+                            <td>@bill.Name</td>
+                            <td>@bill.NextDueDate.ToString("MMM d, yyyy")</td>
+                            <td>@SetupModel.FormatFrequency(bill.Frequency)</td>
+                            <td class="text-end">
+                                @SetupModel.FormatMoney(bill.AmountCents)
+                            </td>
+                            <td class="text-end">
+                                <form method="post"
+                                      asp-page-handler="DeleteBill">
+                                    <input type="hidden"
+                                           name="id"
+                                           value="@bill.Id" />
+                                    <button class="btn btn-sm btn-link text-danger"
+                                            type="submit">
+                                        Remove
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</section>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

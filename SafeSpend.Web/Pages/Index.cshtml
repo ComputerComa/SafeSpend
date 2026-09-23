@@ -5,11 +5,20 @@
     ViewData["Title"] = "Dashboard";
 }
 
-<div class="mb-4">
-    <h1 class="display-5 fw-semibold">SafeSpend</h1>
-    <p class="text-muted">
-        Paycheck-based cash-flow planning
-    </p>
+<div class="d-flex flex-column flex-md-row justify-content-between
+            align-items-md-center gap-3 mb-4">
+    <div>
+        <p class="text-uppercase text-muted small fw-semibold mb-1">
+            SafeSpend overview
+        </p>
+        <h1 class="display-6 fw-semibold mb-1">Your cash flow</h1>
+        <p class="text-muted mb-0">
+            See what is available now and what is coming next.
+        </p>
+    </div>
+    <a class="btn btn-primary" asp-page="/Setup">
+        Manage setup
+    </a>
 </div>
 
 @if (Model.ScheduleError is not null)
@@ -19,319 +28,281 @@
     </div>
 }
 
-<div class="row g-4 mb-4">
-    <div class="col-lg-5">
-        <div class="card h-100 shadow-sm">
-            <div class="card-header">
-                <strong>Paycheck schedule</strong>
-            </div>
+@if (Model.PlaidDataError is not null)
+{
+    <div class="alert alert-warning" role="alert">
+        @Model.PlaidDataError
+        <a class="alert-link" asp-page="/Setup">Review setup</a>
+    </div>
+}
+
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-xl-3">
+        <div class="card dashboard-stat h-100 shadow-sm">
             <div class="card-body">
-                <form method="post" asp-page-handler="SavePaycheckSchedule">
-                    <div class="mb-3">
-                        <label asp-for="PaycheckInput.NextPaycheckDate"
-                               class="form-label">
-                            Next paycheck
-                        </label>
-                        <input asp-for="PaycheckInput.NextPaycheckDate"
-                               type="date"
-                               class="form-control" />
-                        <span asp-validation-for="PaycheckInput.NextPaycheckDate"
-                              class="text-danger"></span>
-                    </div>
-
-                    <div class="mb-3">
-                        <label asp-for="PaycheckInput.FollowingPaycheckDate"
-                               class="form-label">
-                            Following paycheck
-                        </label>
-                        <input asp-for="PaycheckInput.FollowingPaycheckDate"
-                               type="date"
-                               class="form-control" />
-                        <span asp-validation-for="PaycheckInput.FollowingPaycheckDate"
-                              class="text-danger"></span>
-                    </div>
-
-                    <div class="mb-3">
-                        <label asp-for="PaycheckInput.AmountDollars"
-                               class="form-label">
-                            Paycheck amount
-                        </label>
-                        <div class="input-group">
-                            <span class="input-group-text">$</span>
-                            <input asp-for="PaycheckInput.AmountDollars"
-                                   type="number"
-                                   min="0.01"
-                                   step="0.01"
-                                   class="form-control" />
-                        </div>
-                        <span asp-validation-for="PaycheckInput.AmountDollars"
-                              class="text-danger"></span>
-                    </div>
-
-                    <div class="mb-3">
-                        <label asp-for="PaycheckInput.CushionDollars"
-                               class="form-label">
-                            Safety cushion
-                        </label>
-                        <div class="input-group">
-                            <span class="input-group-text">$</span>
-                            <input asp-for="PaycheckInput.CushionDollars"
-                                   type="number"
-                                   min="0"
-                                   step="0.01"
-                                   class="form-control" />
-                        </div>
-                        <span asp-validation-for="PaycheckInput.CushionDollars"
-                              class="text-danger"></span>
-                    </div>
-
-                    <button class="btn btn-primary" type="submit">
-                        Save paycheck schedule
-                    </button>
-                </form>
+                <p class="text-muted small mb-2">Current balance</p>
+                <div class="h3 mb-2">
+                    @(Model.CurrentBalanceCents.HasValue
+                        ? IndexModel.FormatMoney(Model.CurrentBalanceCents.Value)
+                        : "—")
+                </div>
+                <a class="small" asp-page="/Setup">
+                    @(Model.IsPlaidConnected
+                        ? "View connected accounts"
+                        : "Connect a bank")
+                </a>
             </div>
         </div>
     </div>
 
-    <div class="col-lg-7">
-        <div class="card h-100 shadow-sm">
-            <div class="card-header">
-                <strong>Bill schedule</strong>
-            </div>
+    <div class="col-sm-6 col-xl-3">
+        <div class="card dashboard-stat h-100 shadow-sm">
             <div class="card-body">
-                <form method="post" asp-page-handler="AddBill">
-                    <div class="row g-2 align-items-end">
-                        <div class="col-md-5">
-                            <label asp-for="BillInput.Name" class="form-label">
-                                Bill name
-                            </label>
-                            <input asp-for="BillInput.Name"
-                                   class="form-control"
-                                   placeholder="Rent" />
-                        </div>
-                        <div class="col-md-3">
-                            <label asp-for="BillInput.NextDueDate"
-                                   class="form-label">
-                                Next due
-                            </label>
-                            <input asp-for="BillInput.NextDueDate"
-                                   type="date"
-                                   class="form-control" />
-                        </div>
-                        <div class="col-md-2">
-                            <label asp-for="BillInput.AmountDollars"
-                                   class="form-label">
-                                Amount
-                            </label>
-                            <input asp-for="BillInput.AmountDollars"
-                                   type="number"
-                                   min="0.01"
-                                   step="0.01"
-                                   class="form-control" />
-                        </div>
-                        <div class="col-md-2">
-                            <label asp-for="BillInput.Frequency"
-                                   class="form-label">
-                                Frequency
-                            </label>
-                            <select asp-for="BillInput.Frequency"
-                                    class="form-select">
-                                @foreach (var frequency in
-                                    Enum.GetValues<BillFrequency>())
-                                {
-                                    <option value="@frequency">
-                                        @IndexModel.FormatFrequency(frequency)
-                                    </option>
-                                }
-                            </select>
-                        </div>
-                    </div>
+                <p class="text-muted small mb-2">Safe to spend now</p>
+                <div class="h3 mb-2 @(Model.Forecast is null
+                    ? "text-muted"
+                    : Model.Forecast.SafeToSpendNowCents >= 0
+                        ? "text-success"
+                        : "text-danger")">
+                    @(Model.Forecast is null
+                        ? "—"
+                        : IndexModel.FormatMoney(
+                            Model.Forecast.SafeToSpendNowCents))
+                </div>
+                <span class="small text-muted">
+                    Through @Model.NextPaycheckDate?.ToString("MMMM d")
+                </span>
+            </div>
+        </div>
+    </div>
 
-                    <div class="mt-3">
-                        <button class="btn btn-outline-primary" type="submit">
-                            Add bill
-                        </button>
-                    </div>
-                </form>
+    <div class="col-sm-6 col-xl-3">
+        <div class="card dashboard-stat h-100 shadow-sm">
+            <div class="card-body">
+                <p class="text-muted small mb-2">Upcoming bills</p>
+                <div class="h3 mb-2">
+                    @(Model.Forecast is null
+                        ? "—"
+                        : IndexModel.FormatMoney(Model.UpcomingTotalCents))
+                </div>
+                <span class="small text-muted">
+                    Before your next paycheck
+                </span>
+            </div>
+        </div>
+    </div>
 
-                @if (Model.BillSchedules.Count == 0)
-                {
-                    <p class="text-muted mt-4 mb-0">
-                        Add bills to include them in the forecast.
-                    </p>
-                }
-                else
-                {
-                    <div class="table-responsive mt-4">
-                        <table class="table table-sm align-middle mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Bill</th>
-                                    <th>Next due</th>
-                                    <th>Frequency</th>
-                                    <th class="text-end">Amount</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                            @foreach (var bill in Model.BillSchedules)
-                            {
-                                <tr>
-                                    <td>@bill.Name</td>
-                                    <td>@bill.NextDueDate.ToString("MMM d, yyyy")</td>
-                                    <td>
-                                        @IndexModel.FormatFrequency(bill.Frequency)
-                                    </td>
-                                    <td class="text-end">
-                                        @IndexModel.FormatMoney(bill.AmountCents)
-                                    </td>
-                                    <td class="text-end">
-                                        <form method="post"
-                                              asp-page-handler="DeleteBill">
-                                            <input type="hidden" name="id"
-                                                   value="@bill.Id" />
-                                            <button class="btn btn-sm btn-link text-danger"
-                                                    type="submit">
-                                                Remove
-                                            </button>
-                                        </form>
-                                    </td>
-                                </tr>
-                            }
-                            </tbody>
-                        </table>
-                    </div>
-                }
+    <div class="col-sm-6 col-xl-3">
+        <div class="card dashboard-stat h-100 shadow-sm">
+            <div class="card-body">
+                <p class="text-muted small mb-2">Next paycheck</p>
+                <div class="h3 mb-2">
+                    @(Model.PaycheckSchedule is null
+                        ? "—"
+                        : IndexModel.FormatMoney(
+                            Model.PaycheckSchedule.AmountCents))
+                </div>
+                <span class="small text-muted">
+                    @(Model.NextPaycheckDate?.ToString("MMM d, yyyy")
+                        ?? "Add a schedule")
+                </span>
             </div>
         </div>
     </div>
 </div>
 
-@if (Model.ForecastError is not null)
+@if (Model.NeedsSetup || Model.ForecastError is not null)
 {
-    <div class="alert alert-info" role="status">
-        @Model.ForecastError
-        @if (!Model.IsPlaidConnected)
-        {
-            <a asp-page="/Plaid/Connect" class="alert-link">
-                Connect a bank
+    <div class="card border-primary-subtle bg-primary-subtle mb-4">
+        <div class="card-body d-flex flex-column flex-md-row
+                    justify-content-between align-items-md-center gap-3">
+            <div>
+                <h2 class="h5 mb-1">Finish your setup</h2>
+                <p class="mb-0">@Model.SetupMessage</p>
+            </div>
+            <a class="btn btn-primary" asp-page="/Setup">
+                Open setup
             </a>
-        }
+        </div>
     </div>
 }
 
-@if (Model.Forecast is not null)
-{
-    <div class="alert alert-success">
-        Forecast uses the connected checking and savings account balance.
+<div class="row g-4 mb-4">
+    <div class="col-lg-7">
+        <div class="card shadow-sm h-100">
+            <div class="card-header d-flex justify-content-between
+                        align-items-center">
+                <strong>Forecast</strong>
+                <a class="small" asp-page="/Setup">Edit schedules</a>
+            </div>
+
+            @if (Model.ForecastError is not null)
+            {
+                <div class="card-body text-muted">
+                    @Model.ForecastError
+                </div>
+            }
+            else if (Model.Forecast is not null)
+            {
+                <div class="card-body">
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <div class="rounded bg-body-tertiary p-3 h-100">
+                                <p class="text-muted small mb-2">
+                                    Available after next paycheck
+                                </p>
+                                <div class="h4 mb-1 @(Model.Forecast
+                                    .AvailableFromNextPaycheckCents >= 0
+                                    ? "text-success"
+                                    : "text-danger")">
+                                    @IndexModel.FormatMoney(
+                                        Model.Forecast
+                                            .AvailableFromNextPaycheckCents)
+                                </div>
+                                <span class="small text-muted">
+                                    After bills and safety cushion
+                                </span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="rounded bg-body-tertiary p-3 h-100">
+                                <p class="text-muted small mb-2">
+                                    Safety cushion
+                                </p>
+                                <div class="h4 mb-1">
+                                    @IndexModel.FormatMoney(
+                                        Model.PaycheckSchedule!.CushionCents)
+                                </div>
+                                <span class="small text-muted">
+                                    Kept aside in the forecast
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h2 class="h6">Upcoming expenses</h2>
+                    @if (Model.UpcomingOccurrences.Count == 0)
+                    {
+                        <p class="text-muted mb-0">
+                            No bills are scheduled before the following paycheck.
+                        </p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Description</th>
+                                        <th>Due date</th>
+                                        <th class="text-end">Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                @foreach (var occurrence in
+                                    Model.UpcomingOccurrences)
+                                {
+                                    <tr>
+                                        <td>@occurrence.Name</td>
+                                        <td>
+                                            @occurrence.Date.ToString("MMM d")
+                                        </td>
+                                        <td class="text-end">
+                                            @IndexModel.FormatMoney(
+                                                occurrence.AmountCents)
+                                        </td>
+                                    </tr>
+                                }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
     </div>
 
-    <div class="row g-4 mb-4">
-        <div class="col-md-6">
-            <div class="card h-100 shadow-sm">
-                <div class="card-body">
-                    <h2 class="h5 text-muted">Safe to spend now</h2>
-
-                    <div class="display-5 fw-bold
-                        @(Model.Forecast.SafeToSpendNowCents >= 0
-                            ? "text-success"
-                            : "text-danger")">
-                        @IndexModel.FormatMoney(
-                            Model.Forecast.SafeToSpendNowCents)
-                    </div>
-
-                    <div class="mt-3 text-muted">
-                        Through
-                        @Model.NextPaycheckDate?.ToString("MMMM d")
-                    </div>
-                </div>
+    <div class="col-lg-5">
+        <div class="card shadow-sm h-100">
+            <div class="card-header d-flex justify-content-between
+                        align-items-center">
+                <strong>Connected accounts</strong>
+                <a class="small" asp-page="/Plaid/Connect">View details</a>
             </div>
-        </div>
-
-        <div class="col-md-6">
-            <div class="card h-100 shadow-sm">
-                <div class="card-body">
-                    <h2 class="h5 text-muted">
-                        Available from next paycheck
-                    </h2>
-
-                    <div class="display-5 fw-bold
-                        @(Model.Forecast.AvailableFromNextPaycheckCents >= 0
-                            ? "text-success"
-                            : "text-danger")">
-                        @IndexModel.FormatMoney(
-                            Model.Forecast.AvailableFromNextPaycheckCents)
-                    </div>
-
-                    <div class="mt-3 text-muted">
-                        After upcoming bills and safety cushion
-                    </div>
+            @if (!Model.IsPlaidConnected)
+            {
+                <div class="card-body text-muted">
+                    Connect a bank to see your checking and savings balances.
                 </div>
-            </div>
+            }
+            else if (Model.ConnectedAccounts.Count == 0)
+            {
+                <div class="card-body text-muted">
+                    No checking or savings accounts are available.
+                </div>
+            }
+            else
+            {
+                <div class="list-group list-group-flush">
+                @foreach (var account in Model.ConnectedAccounts)
+                {
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between gap-3">
+                            <div>
+                                <strong>@account.Name</strong>
+                                @if (!string.IsNullOrWhiteSpace(account.Mask))
+                                {
+                                    <span class="text-muted">
+                                        ····@account.Mask
+                                    </span>
+                                }
+                                <small class="d-block text-muted">
+                                    @account.Subtype
+                                </small>
+                            </div>
+                            <strong>
+                                @(account.CurrentBalance?.ToString("C")
+                                    ?? account.AvailableBalance?.ToString("C")
+                                    ?? "—")
+                            </strong>
+                        </div>
+                    </div>
+                }
+                </div>
+            }
         </div>
     </div>
+</div>
 
-    <div class="card shadow-sm">
-        <div class="card-header">
-            <strong>Upcoming expenses</strong>
-        </div>
-
-        @if (Model.UpcomingOccurrences.Count == 0)
+<div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between
+                align-items-center">
+        <strong>Recent transactions</strong>
+        @if (Model.IsPlaidConnected)
         {
-            <div class="card-body text-muted">
-                No bills are scheduled before the following paycheck.
+            <div class="d-flex gap-2">
+                <form method="post" asp-page-handler="SyncTransactions">
+                    <button class="btn btn-sm btn-outline-primary"
+                            type="submit">
+                        Sync now
+                    </button>
+                </form>
+                <a class="btn btn-sm btn-outline-secondary"
+                   asp-page="/Plaid/Connect">
+                    Manage connection
+                </a>
             </div>
         }
         else
         {
-            <div class="table-responsive">
-                <table class="table table-striped mb-0">
-                    <thead>
-                        <tr>
-                            <th>Description</th>
-                            <th>Due date</th>
-                            <th class="text-end">Amount</th>
-                        </tr>
-                    </thead>
-
-                    <tbody>
-                    @foreach (var occurrence in Model.UpcomingOccurrences)
-                    {
-                        <tr>
-                            <td>@occurrence.Name</td>
-                            <td>@occurrence.Date.ToString("MMM d, yyyy")</td>
-                            <td class="text-end">
-                                @IndexModel.FormatMoney(
-                                    occurrence.AmountCents)
-                            </td>
-                        </tr>
-                    }
-                    </tbody>
-                </table>
-            </div>
-        }
-    </div>
-}
-
-<div class="card shadow-sm mt-4">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <strong>Recent transactions</strong>
-        @if (Model.IsPlaidConnected)
-        {
             <a class="btn btn-sm btn-outline-secondary"
-               asp-page="/Plaid/Connect">
-                Manage connection
+               asp-page="/Setup">
+                Set up bank
             </a>
         }
     </div>
 
-    @if (Model.PlaidDataError is not null)
-    {
-        <div class="alert alert-danger m-3 mb-0" role="alert">
-            @Model.PlaidDataError
-        </div>
-    }
-    else if (!Model.IsPlaidConnected)
+    @if (!Model.IsPlaidConnected)
     {
         <div class="card-body text-muted">
             Connect a bank to import transactions.
@@ -340,7 +311,7 @@
     else if (Model.RecentTransactions.Count == 0)
     {
         <div class="card-body text-muted">
-            No synced transactions yet. Use the connection page to sync Plaid.
+            No synced transactions yet. Sync from the Plaid connection page.
         </div>
     }
     else
@@ -384,7 +355,3 @@
         </div>
     }
 </div>
-
-@section Scripts {
-    <partial name="_ValidationScriptsPartial" />
-}

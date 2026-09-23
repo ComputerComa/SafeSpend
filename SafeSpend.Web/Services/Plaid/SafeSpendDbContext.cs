@@ -8,6 +8,9 @@ public sealed class SafeSpendDbContext(
 {
     public DbSet<PlaidItemEntity> PlaidItems => Set<PlaidItemEntity>();
 
+    public DbSet<PlaidConnectionEntity> PlaidConnections =>
+        Set<PlaidConnectionEntity>();
+
     public DbSet<PlaidTransactionEntity> PlaidTransactions =>
         Set<PlaidTransactionEntity>();
 
@@ -26,6 +29,28 @@ public sealed class SafeSpendDbContext(
                 .HasMaxLength(128);
             entity.Property(row => row.TransactionCursor)
                 .HasMaxLength(512);
+        });
+
+        modelBuilder.Entity<PlaidConnectionEntity>(entity =>
+        {
+            entity.HasKey(row => row.UserId);
+            entity.Property(row => row.UserId)
+                .HasMaxLength(128);
+            entity.Property(row => row.ItemId)
+                .HasMaxLength(128)
+                .IsRequired();
+            entity.Property(row => row.ProtectedAccessToken)
+                .HasMaxLength(4096)
+                .IsRequired();
+            entity.Property(row => row.TransactionCursor)
+                .HasMaxLength(512);
+            entity.Property(row => row.Status)
+                .HasMaxLength(64)
+                .IsRequired();
+            entity.Property(row => row.LastWebhookCode)
+                .HasMaxLength(128);
+            entity.HasIndex(row => row.ItemId)
+                .IsUnique();
         });
 
         modelBuilder.Entity<PlaidTransactionEntity>(entity =>
@@ -82,6 +107,23 @@ public sealed class PlaidItemEntity
     public required string ItemId { get; set; }
 
     public string? TransactionCursor { get; set; }
+}
+
+public sealed class PlaidConnectionEntity
+{
+    public required string UserId { get; set; }
+
+    public required string ItemId { get; set; }
+
+    public required string ProtectedAccessToken { get; set; }
+
+    public string? TransactionCursor { get; set; }
+
+    public required string Status { get; set; }
+
+    public string? LastWebhookCode { get; set; }
+
+    public DateTimeOffset? LastWebhookAt { get; set; }
 }
 
 public sealed class PlaidTransactionEntity

@@ -1,21 +1,37 @@
 using Going.Plaid.Entity;
+using SafeSpend.Web.Services.Identity;
 
 namespace SafeSpend.Web.Services.Plaid;
 
 public sealed class PlaidLinkService(
     IPlaidApi plaidApi,
-    PlaidConnectionState connectionState,
-    IPlaidTransactionStore transactionStore)
+    IPlaidConnectionStore connectionStore,
+    IPlaidTransactionStore transactionStore,
+    ICurrentUserContext currentUser,
+    IPlaidSyncCoordinator syncCoordinator,
+    IPlaidSyncQueue syncQueue)
 {
     public async Task<string> CreateLinkTokenAsync()
     {
-        return await plaidApi.CreateLinkTokenAsync();
+        var userId = currentUser.GetRequiredUserId();
+        var connection = await connectionStore.GetAsync(userId);
+        return await plaidApi.CreateLinkTokenAsync(
+            userId,
+            connection?.AccessToken);
+    }
+
+    public async Task<bool> IsConnectedAsync()
+    {
+        var connection = await connectionStore.GetAsync(
+            currentUser.GetRequiredUserId());
+        return connection is not null;
     }
 
     public async Task<string> ExchangePublicTokenAsync(string publicToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(publicToken);
 
+        var userId = currentUser.GetRequiredUserId();
         var response = await plaidApi.ExchangePublicTokenAsync(publicToken);
 
         if (string.IsNullOrWhiteSpace(response.AccessToken) ||
@@ -25,14 +41,15 @@ public sealed class PlaidLinkService(
                 "Plaid did not return an access token and Item ID.");
         }
 
-        // Never send the access token to the browser.
         var transactionCursor = await transactionStore
             .GetCursorAsync(response.ItemId);
 
-        connectionState.SetConnection(
-            response.AccessToken,
+        await connectionStore.SaveAsync(
+            userId,
             response.ItemId,
+            response.AccessToken,
             transactionCursor);
+        syncQueue.Enqueue(userId);
 
         return response.ItemId;
     }
@@ -40,8 +57,9 @@ public sealed class PlaidLinkService(
     public async Task<IReadOnlyList<PlaidAccountSummary>>
         GetCheckingAndSavingsAccountsAsync()
     {
-        var accessToken = GetRequiredAccessToken();
-        var response = await plaidApi.GetAccountsAsync(accessToken);
+        var connection = await GetRequiredConnectionAsync();
+        var response = await plaidApi.GetAccountsAsync(
+            connection.AccessToken);
 
         return (response.Accounts ?? [])
             .Where(account =>
@@ -54,9 +72,41 @@ public sealed class PlaidLinkService(
 
     public async Task<PlaidTransactionSyncResult> SyncTransactionsAsync()
     {
-        var accessToken = GetRequiredAccessToken();
-        var itemId = GetRequiredItemId();
-        var cursor = connectionState.TransactionCursor;
+        return await SyncTransactionsForUserAsync(
+            currentUser.GetRequiredUserId());
+    }
+
+    public async Task<PlaidTransactionSyncResult> SyncTransactionsForUserAsync(
+        string userId)
+    {
+        return await syncCoordinator.RunAsync(
+            userId,
+            () => SyncTransactionsForUserCoreAsync(userId));
+    }
+
+    public async Task<string> GetConnectionStatusAsync()
+    {
+        var connection = await connectionStore.GetAsync(
+            currentUser.GetRequiredUserId());
+        return connection?.Status ?? "Disconnected";
+    }
+
+    private async Task<PlaidTransactionSyncResult>
+        SyncTransactionsForUserCoreAsync(string userId)
+    {
+        var connection = await connectionStore.GetAsync(
+            userId);
+
+        return await SyncTransactionsForConnectionAsync(
+            connection ?? throw new InvalidOperationException(
+                "A Plaid connection is required."));
+    }
+
+    private async Task<PlaidTransactionSyncResult>
+        SyncTransactionsForConnectionAsync(PlaidConnection connection)
+    {
+        var cursor = connection.TransactionCursor ?? await transactionStore
+            .GetCursorAsync(connection.ItemId);
         var added = new List<PlaidTransactionSummary>();
         var modified = new List<PlaidTransactionSummary>();
         var removed = new List<PlaidRemovedTransactionSummary>();
@@ -65,7 +115,7 @@ public sealed class PlaidLinkService(
         do
         {
             var response = await plaidApi.SyncTransactionsAsync(
-                accessToken,
+                connection.AccessToken,
                 cursor,
                 count: 500);
 
@@ -90,8 +140,10 @@ public sealed class PlaidLinkService(
             removed,
             cursor);
 
-        await transactionStore.ApplySyncAsync(itemId, result);
-        connectionState.SetTransactionCursor(cursor);
+        await transactionStore.ApplySyncAsync(connection.ItemId, result);
+        await connectionStore.SetCursorAsync(
+            connection.UserId,
+            cursor);
 
         return result;
     }
@@ -99,30 +151,39 @@ public sealed class PlaidLinkService(
     public async Task<IReadOnlyList<PlaidTransactionSummary>>
         GetStoredTransactionsAsync()
     {
+        var connection = await GetRequiredConnectionAsync();
         return await transactionStore.GetTransactionsAsync(
-            GetRequiredItemId());
+            connection.ItemId);
     }
 
-    private string GetRequiredAccessToken()
+    public async Task DisconnectAsync()
     {
-        if (!connectionState.TryGetAccessToken(out var accessToken))
-        {
-            throw new InvalidOperationException(
-                "A Plaid connection is required.");
-        }
+        var userId = currentUser.GetRequiredUserId();
+        await syncCoordinator.RunAsync(
+            userId,
+            async () =>
+            {
+                var connection = await connectionStore.GetAsync(userId);
 
-        return accessToken;
+                if (connection is null)
+                {
+                    return true;
+                }
+
+                await plaidApi.RemoveItemAsync(connection.AccessToken);
+                await transactionStore.DeleteAsync(connection.ItemId);
+                await connectionStore.DeleteAsync(userId);
+                return true;
+            });
     }
 
-    private string GetRequiredItemId()
+    private async Task<PlaidConnection> GetRequiredConnectionAsync()
     {
-        if (string.IsNullOrWhiteSpace(connectionState.ItemId))
-        {
-            throw new InvalidOperationException(
-                "A Plaid connection is required.");
-        }
+        var connection = await connectionStore.GetAsync(
+            currentUser.GetRequiredUserId());
 
-        return connectionState.ItemId;
+        return connection ?? throw new InvalidOperationException(
+            "A Plaid connection is required.");
     }
 
     private static string? NormalizeCursor(string? cursor)

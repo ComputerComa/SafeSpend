@@ -1,24 +1,27 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using SafeSpend.Web.Services.Plaid;
 
 namespace SafeSpend.Web.Pages.Plaid;
 
+[Authorize]
 public sealed class ConnectModel(
     PlaidLinkService plaidLinkService,
-    PlaidConnectionState connectionState,
     ILogger<ConnectModel> logger) : PageModel
 {
     public IReadOnlyList<PlaidAccountSummary> Accounts { get; private set; } = [];
 
     public string? AccountLoadError { get; private set; }
 
-    public bool IsConnected => connectionState.IsConnected;
+    public bool IsConnected { get; private set; }
 
-    public string? ItemId => connectionState.ItemId;
+    public string ConnectionStatus { get; private set; } = "Disconnected";
 
     public async Task OnGetAsync()
     {
+        await LoadConnectionAsync();
+
         if (!IsConnected)
         {
             return;
@@ -78,14 +81,10 @@ public sealed class ConnectModel(
 
         try
         {
-            var itemId =
-                await plaidLinkService.ExchangePublicTokenAsync(
-                    request.PublicToken);
+            await plaidLinkService.ExchangePublicTokenAsync(
+                request.PublicToken);
 
-            return new JsonResult(new
-            {
-                itemId
-            });
+            return new JsonResult(new { connected = true });
         }
         catch (Exception exception)
         {
@@ -124,6 +123,32 @@ public sealed class ConnectModel(
                 error = "Transactions could not be synced right now."
             });
         }
+    }
+
+    public async Task<IActionResult> OnPostDisconnectAsync()
+    {
+        try
+        {
+            await plaidLinkService.DisconnectAsync();
+            return new JsonResult(new { disconnected = true });
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                "Unable to disconnect the Plaid Item. Error type: {ErrorType}",
+                exception.GetType().Name);
+
+            return BadRequest(new
+            {
+                error = "The Plaid connection could not be removed right now."
+            });
+        }
+    }
+
+    private async Task LoadConnectionAsync()
+    {
+        IsConnected = await plaidLinkService.IsConnectedAsync();
+        ConnectionStatus = await plaidLinkService.GetConnectionStatusAsync();
     }
 
     public sealed record ExchangePublicTokenRequest(

@@ -101,6 +101,31 @@ public sealed class PlaidTransactionStore(
             .ToArray();
     }
 
+    public async Task DeleteAsync(string itemId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(itemId);
+
+        await using var context =
+            await contextFactory.CreateDbContextAsync();
+        await using var transaction =
+            await context.Database.BeginTransactionAsync();
+
+        var transactions = await context.PlaidTransactions
+            .Where(row => row.ItemId == itemId)
+            .ToListAsync();
+        context.PlaidTransactions.RemoveRange(transactions);
+
+        var item = await context.PlaidItems
+            .SingleOrDefaultAsync(row => row.ItemId == itemId);
+        if (item is not null)
+        {
+            context.PlaidItems.Remove(item);
+        }
+
+        await context.SaveChangesAsync();
+        await transaction.CommitAsync();
+    }
+
     private static PlaidTransactionEntity CreateEntity(
         string itemId,
         PlaidTransactionSummary transaction)

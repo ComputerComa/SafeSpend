@@ -74,6 +74,10 @@ public sealed class PlaidTransactionStoreTests
             Assert.Equal("transaction-one", transaction.TransactionId);
             Assert.Equal("Updated Checking", transaction.Name);
             Assert.Equal(30m, transaction.Amount);
+
+            await reloadedStore.DeleteAsync("item-id");
+            Assert.Empty(await reloadedStore.GetTransactionsAsync("item-id"));
+            Assert.Null(await reloadedStore.GetCursorAsync("item-id"));
         }
         finally
         {

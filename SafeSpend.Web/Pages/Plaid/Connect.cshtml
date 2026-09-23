@@ -5,9 +5,10 @@
 }
 
 <div class="mb-4">
+    <a asp-page="/Setup" class="small">&larr; Back to setup</a>
     <h1>Connect a bank</h1>
     <p class="text-muted">
-        Connect a Sandbox institution through Plaid Link.
+        Connect a bank through Plaid Link.
     </p>
 </div>
 
@@ -15,14 +16,29 @@
 {
     <div class="alert alert-success">
         Plaid is connected.
-        Item ID: <code>@Model.ItemId</code>
     </div>
 
-    <button id="sync-transactions"
-            class="btn btn-outline-primary mb-4"
-            type="button">
-        Sync transactions
-    </button>
+    @if (string.Equals(Model.ConnectionStatus, "ActionRequired",
+                      StringComparison.Ordinal))
+    {
+        <div class="alert alert-warning" role="alert">
+            Plaid needs attention for this connection. Use Plaid Link to
+            complete the bank's update or sign-in flow.
+        </div>
+    }
+
+    <div class="d-flex gap-2 mb-4">
+        <button id="sync-transactions"
+                class="btn btn-outline-primary"
+                type="button">
+            Sync transactions
+        </button>
+        <button id="disconnect-plaid"
+                class="btn btn-outline-danger"
+                type="button">
+            Disconnect bank
+        </button>
+    </div>
 
     @if (Model.AccountLoadError is not null)
     {
@@ -101,7 +117,7 @@
 <button id="connect-plaid"
         class="btn btn-primary"
         type="button">
-    Connect with Plaid
+    @(Model.IsConnected ? "Update bank connection" : "Connect with Plaid")
 </button>
 
 <div id="plaid-status"
@@ -119,6 +135,9 @@
 
             const syncButton =
                 document.getElementById("sync-transactions");
+
+            const disconnectButton =
+                document.getElementById("disconnect-plaid");
 
             const statusBox =
                 document.getElementById("plaid-status");
@@ -185,7 +204,7 @@
                                     );
 
                                 showStatus(
-                                    `Plaid connection complete. Item: ${exchangeResult.itemId}`,
+                                    "Plaid connection complete.",
                                     "success"
                                 );
 
@@ -243,6 +262,29 @@
                         showStatus(error.message, "danger");
                     } finally {
                         syncButton.disabled = false;
+                    }
+                });
+            }
+
+            if (disconnectButton) {
+                disconnectButton.addEventListener("click", async () => {
+                    if (!window.confirm(
+                        "Disconnect this bank and remove its Plaid Item?")) {
+                        return;
+                    }
+
+                    disconnectButton.disabled = true;
+                    showStatus("Disconnecting bank…", "info");
+
+                    try {
+                        await post("Disconnect");
+                        showStatus(
+                            "Bank disconnected.",
+                            "success");
+                        window.location.reload();
+                    } catch (error) {
+                        showStatus(error.message, "danger");
+                        disconnectButton.disabled = false;
                     }
                 });
             }

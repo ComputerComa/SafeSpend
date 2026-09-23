@@ -4,12 +4,17 @@ using Going.Plaid.Entity;
 using Going.Plaid.Item;
 using Going.Plaid.Link;
 using Going.Plaid.Transactions;
+using Going.Plaid.WebhookVerificationKey;
 
 namespace SafeSpend.Web.Services.Plaid;
 
-public sealed class PlaidApi(PlaidClient plaidClient) : IPlaidApi
+public sealed class PlaidApi(
+    PlaidClient plaidClient,
+    IConfiguration configuration) : IPlaidApi
 {
-    public async Task<string> CreateLinkTokenAsync()
+    public async Task<string> CreateLinkTokenAsync(
+        string clientUserId,
+        string? accessToken)
     {
         var response = await plaidClient.LinkTokenCreateAsync(
             new LinkTokenCreateRequest
@@ -17,10 +22,14 @@ public sealed class PlaidApi(PlaidClient plaidClient) : IPlaidApi
                 ClientName = "SafeSpend",
                 Language = Language.English,
                 CountryCodes = [CountryCode.Us],
-                Products = [Products.Transactions],
+                Products = string.IsNullOrWhiteSpace(accessToken)
+                    ? [Products.Transactions]
+                    : null,
+                AccessToken = accessToken,
+                Webhook = configuration["SafeSpend:PlaidWebhookUrl"],
                 User = new()
                 {
-                    ClientUserId = "safespend-local-owner"
+                    ClientUserId = clientUserId
                 }
             });
 
@@ -56,6 +65,17 @@ public sealed class PlaidApi(PlaidClient plaidClient) : IPlaidApi
             response.ItemId);
     }
 
+    public async Task RemoveItemAsync(string accessToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(accessToken);
+
+        await plaidClient.ItemRemoveAsync(
+            new ItemRemoveRequest
+            {
+                AccessToken = accessToken
+            });
+    }
+
     public Task<AccountsGetResponse> GetAccountsAsync(
         string accessToken)
     {
@@ -86,5 +106,39 @@ public sealed class PlaidApi(PlaidClient plaidClient) : IPlaidApi
                     IncludeOriginalDescription = true
                 }
             });
+    }
+
+    public async Task<PlaidWebhookVerificationKey>
+        GetWebhookVerificationKeyAsync(string keyId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(keyId);
+
+        var response = await plaidClient.WebhookVerificationKeyGetAsync(
+            new WebhookVerificationKeyGetRequest
+            {
+                KeyId = keyId
+            });
+        var key = response.Key;
+
+        if (key is null ||
+            string.IsNullOrWhiteSpace(key.Kid) ||
+            string.IsNullOrWhiteSpace(key.Alg) ||
+            string.IsNullOrWhiteSpace(key.Crv) ||
+            string.IsNullOrWhiteSpace(key.X) ||
+            string.IsNullOrWhiteSpace(key.Y))
+        {
+            throw new InvalidOperationException(
+                "Plaid did not return a usable webhook verification key.");
+        }
+
+        return new PlaidWebhookVerificationKey(
+            key.Kid,
+            key.Alg,
+            key.Crv,
+            key.X,
+            key.Y,
+            key.ExpiredAt is null
+                ? null
+                : DateTimeOffset.FromUnixTimeSeconds(key.ExpiredAt.Value));
     }
 }

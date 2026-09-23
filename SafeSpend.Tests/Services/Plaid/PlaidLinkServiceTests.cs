@@ -1,6 +1,7 @@
 using Going.Plaid.Accounts;
 using Going.Plaid.Entity;
 using Going.Plaid.Transactions;
+using SafeSpend.Web.Services.Identity;
 using SafeSpend.Web.Services.Plaid;
 
 namespace SafeSpend.Tests.Services.Plaid;
@@ -60,12 +61,12 @@ public sealed class PlaidLinkServiceTests
                 ]
             }
         };
-        var state = CreateConnectedState();
         var transactionStore = new FakePlaidTransactionStore();
-        var service = new PlaidLinkService(
+        var connectionStore = CreateConnectedStore();
+        var service = CreateService(
             plaidApi,
-            state,
-            transactionStore);
+            transactionStore,
+            connectionStore);
 
         var accounts = await service.GetCheckingAndSavingsAccountsAsync();
 
@@ -136,12 +137,12 @@ public sealed class PlaidLinkServiceTests
                 HasMore = false
             });
 
-        var state = CreateConnectedState();
         var transactionStore = new FakePlaidTransactionStore();
-        var service = new PlaidLinkService(
+        var connectionStore = CreateConnectedStore();
+        var service = CreateService(
             plaidApi,
-            state,
-            transactionStore);
+            transactionStore,
+            connectionStore);
 
         var result = await service.SyncTransactionsAsync();
 
@@ -155,7 +156,7 @@ public sealed class PlaidLinkServiceTests
         Assert.Equal("removed-id", result.Removed[0].TransactionId);
         Assert.Equal("final-cursor", result.NextCursor);
         Assert.Equal([null, "page-one"], plaidApi.TransactionCursors);
-        Assert.Equal("final-cursor", state.TransactionCursor);
+        Assert.Equal("final-cursor", connectionStore.Connection!.TransactionCursor);
         Assert.Single(transactionStore.AppliedResults);
         Assert.Equal("final-cursor", transactionStore.Cursor);
 
@@ -172,29 +173,75 @@ public sealed class PlaidLinkServiceTests
     }
 
     [Fact]
-    public async Task ExchangePublicTokenAsync_RestoresPersistedCursor()
+    public async Task ExchangePublicTokenAsync_PersistsConnectionAndCursor()
     {
         var plaidApi = new FakePlaidApi();
         var transactionStore = new FakePlaidTransactionStore
         {
             Cursor = "persisted-cursor"
         };
-        var state = new PlaidConnectionState();
-        var service = new PlaidLinkService(
+        var connectionStore = new FakePlaidConnectionStore();
+        var service = CreateService(
             plaidApi,
-            state,
-            transactionStore);
+            transactionStore,
+            connectionStore);
 
         await service.ExchangePublicTokenAsync("public-token");
 
-        Assert.Equal("persisted-cursor", state.TransactionCursor);
+        Assert.NotNull(connectionStore.Connection);
+        Assert.Equal("item-id", connectionStore.Connection.ItemId);
+        Assert.Equal(
+            "persisted-cursor",
+            connectionStore.Connection.TransactionCursor);
     }
 
-    private static PlaidConnectionState CreateConnectedState()
+    [Fact]
+    public async Task DisconnectAsync_RemovesRemoteItemAndLocalData()
     {
-        var state = new PlaidConnectionState();
-        state.SetConnection("test-connection-token", "item-id");
-        return state;
+        var plaidApi = new FakePlaidApi();
+        var transactionStore = new FakePlaidTransactionStore();
+        var connectionStore = CreateConnectedStore();
+        var service = CreateService(
+            plaidApi,
+            transactionStore,
+            connectionStore);
+
+        await service.DisconnectAsync();
+
+        Assert.Equal("test-connection-token", plaidApi.RemovedAccessToken);
+        Assert.Null(connectionStore.Connection);
+        Assert.True(transactionStore.WasDeleted);
+    }
+
+    private static PlaidLinkService CreateService(
+        IPlaidApi plaidApi,
+        FakePlaidTransactionStore transactionStore,
+        FakePlaidConnectionStore connectionStore)
+    {
+        return new PlaidLinkService(
+            plaidApi,
+            connectionStore,
+            transactionStore,
+            new FakeCurrentUserContext(),
+            new ImmediatePlaidSyncCoordinator(),
+            new PlaidSyncQueue());
+    }
+
+    private static FakePlaidConnectionStore CreateConnectedStore()
+    {
+        return new FakePlaidConnectionStore
+        {
+            Connection = new PlaidConnection(
+                "user-id",
+                "item-id",
+                "test-connection-token",
+                null)
+        };
+    }
+
+    private sealed class FakeCurrentUserContext : ICurrentUserContext
+    {
+        public string GetRequiredUserId() => "user-id";
     }
 
     private sealed class FakePlaidApi : IPlaidApi
@@ -207,7 +254,11 @@ public sealed class PlaidLinkServiceTests
 
         public List<string?> TransactionCursors { get; } = [];
 
-        public Task<string> CreateLinkTokenAsync() =>
+        public string? RemovedAccessToken { get; private set; }
+
+        public Task<string> CreateLinkTokenAsync(
+            string clientUserId,
+            string? accessToken) =>
             Task.FromResult("link-token");
 
         public Task<PlaidTokenExchangeResult> ExchangePublicTokenAsync(
@@ -216,6 +267,15 @@ public sealed class PlaidLinkServiceTests
                 new PlaidTokenExchangeResult(
                     "test-connection-token",
                     "item-id"));
+
+        public Task RemoveItemAsync(string accessToken) =>
+            RemoveItemAsyncCore(accessToken);
+
+        private Task RemoveItemAsyncCore(string accessToken)
+        {
+            RemovedAccessToken = accessToken;
+            return Task.CompletedTask;
+        }
 
         public Task<AccountsGetResponse> GetAccountsAsync(
             string accessToken) =>
@@ -229,6 +289,70 @@ public sealed class PlaidLinkServiceTests
             TransactionCursors.Add(cursor);
             return Task.FromResult(TransactionResponses.Dequeue());
         }
+
+        public Task<PlaidWebhookVerificationKey>
+            GetWebhookVerificationKeyAsync(string keyId) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class FakePlaidConnectionStore : IPlaidConnectionStore
+    {
+        public PlaidConnection? Connection { get; set; }
+
+        public Task<PlaidConnection?> GetAsync(string userId) =>
+            Task.FromResult(Connection);
+
+        public Task<PlaidConnection?> GetByItemIdAsync(string itemId) =>
+            Task.FromResult(
+                Connection?.ItemId == itemId ? Connection : null);
+
+        public Task<IReadOnlyList<PlaidConnection>> GetAllAsync() =>
+            Task.FromResult<IReadOnlyList<PlaidConnection>>(
+                Connection is null ? [] : [Connection]);
+
+        public Task SaveAsync(
+            string userId,
+            string itemId,
+            string accessToken,
+            string? transactionCursor)
+        {
+            Connection = new PlaidConnection(
+                userId,
+                itemId,
+                accessToken,
+                transactionCursor);
+            return Task.CompletedTask;
+        }
+
+        public Task SetCursorAsync(string userId, string? transactionCursor)
+        {
+            Connection = Connection! with
+            {
+                TransactionCursor = transactionCursor
+            };
+            return Task.CompletedTask;
+        }
+
+        public Task SetWebhookStatusAsync(
+            string userId,
+            string status,
+            string webhookCode,
+            DateTimeOffset receivedAt)
+        {
+            Connection = Connection! with
+            {
+                Status = status,
+                LastWebhookCode = webhookCode,
+                LastWebhookAt = receivedAt
+            };
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteAsync(string userId)
+        {
+            Connection = null;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakePlaidTransactionStore : IPlaidTransactionStore
@@ -236,6 +360,8 @@ public sealed class PlaidLinkServiceTests
         public string? Cursor { get; set; }
 
         public List<PlaidTransactionSyncResult> AppliedResults { get; } = [];
+
+        public bool WasDeleted { get; private set; }
 
         public Task<string?> GetCursorAsync(string itemId) =>
             Task.FromResult(Cursor);
@@ -252,5 +378,20 @@ public sealed class PlaidLinkServiceTests
         public Task<IReadOnlyList<PlaidTransactionSummary>>
             GetTransactionsAsync(string itemId) =>
             Task.FromResult<IReadOnlyList<PlaidTransactionSummary>>([]);
+
+        public Task DeleteAsync(string itemId)
+        {
+            Cursor = null;
+            WasDeleted = true;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class ImmediatePlaidSyncCoordinator
+        : IPlaidSyncCoordinator
+    {
+        public Task<T> RunAsync<T>(
+            string userId,
+            Func<Task<T>> operation) => operation();
     }
 }
