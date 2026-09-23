@@ -1,0 +1,23 @@
+[Unit]
+Description=SafeSpend personal finance application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=safespend
+Group=safespend
+WorkingDirectory=/opt/safespend/current
+ExecStart=/usr/bin/dotnet /opt/safespend/current/SafeSpend.Web.dll
+EnvironmentFile=/etc/safespend/safespend.env
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/safespend
+
+[Install]
+WantedBy=multi-user.target

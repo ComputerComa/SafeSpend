@@ -1,0 +1,91 @@
+name: Build and publish release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore SafeSpend.slnx
+
+      - name: Test
+        run: dotnet test SafeSpend.slnx --no-restore --configuration Release
+
+      - name: Publish application
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          publish_dir="$RUNNER_TEMP/safespend-publish"
+          rm -rf "$publish_dir"
+
+          dotnet publish SafeSpend.Web/SafeSpend.Web.csproj \
+            --configuration Release \
+            --no-restore \
+            --output "$publish_dir"
+
+          # Deployment helpers contain no credentials and make the release
+          # self-documenting when it is downloaded onto the LXC host.
+          cp -R deploy "$publish_dir/deploy"
+
+          archive_name="SafeSpend-${GITHUB_REF_NAME}.zip"
+          latest_archive_name="SafeSpend-latest.zip"
+
+          (cd "$publish_dir" && zip -qr "$RUNNER_TEMP/$archive_name" .)
+          cp "$RUNNER_TEMP/$archive_name" \
+            "$RUNNER_TEMP/$latest_archive_name"
+
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum "$archive_name" > "$archive_name.sha256"
+            sha256sum "$latest_archive_name" > "$latest_archive_name.sha256"
+          )
+
+          echo "archive=$RUNNER_TEMP/$archive_name" >> "$GITHUB_OUTPUT"
+          echo "latest_archive=$RUNNER_TEMP/$latest_archive_name" >> "$GITHUB_OUTPUT"
+          echo "archive_checksum=$RUNNER_TEMP/$archive_name.sha256" >> "$GITHUB_OUTPUT"
+          echo "latest_checksum=$RUNNER_TEMP/$latest_archive_name.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          assets=(
+            "${{ steps.package.outputs.archive }}"
+            "${{ steps.package.outputs.latest_archive }}"
+            "${{ steps.package.outputs.archive_checksum }}"
+            "${{ steps.package.outputs.latest_checksum }}"
+          )
+
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" "${assets[@]}" \
+              --verify-tag \
+              --title "SafeSpend ${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi

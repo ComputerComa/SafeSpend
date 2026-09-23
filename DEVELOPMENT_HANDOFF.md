@@ -26,6 +26,7 @@ The current flow is:
 12. Production uses `App_Data/Production` for its Identity database, application database, and Data Protection keys, keeping the existing Sandbox files under `App_Data` separate.
 13. A hosted worker performs an initial sync, then periodic cursor-based transaction syncs (60 minutes by default). Webhook-triggered syncs are queued and deduplicated, while per-user sync coordination prevents cursor races with manual syncs.
 14. `/api/plaid/webhook` verifies Plaid's `Plaid-Verification` ES256 signature and body hash using `/webhook_verification_key/get`. Transaction update webhooks queue a sync; Item recovery webhooks persist a non-secret `ActionRequired` status. Plaid Link uses update mode for an existing connection so the user can repair it.
+15. `.github/workflows/release.yml` publishes a versioned application ZIP and a `SafeSpend-latest.zip` asset on `v*` tag pushes. The `deploy/` directory contains the LXC installer, systemd unit, persistent-data configuration, checksum-verified updater, and automatic rollback.
 
 ## Important implementation locations
 
@@ -46,6 +47,8 @@ The current flow is:
 - `SafeSpend.Web/Pages/Account/`: Login, one-time administrator setup, logout, and access-denied pages.
 - `SafeSpend.Web/Services/Identity/`: Identity user, Identity database, setup service, and database initialization.
 - `SafeSpend.Web/Pages/Shared/_Layout.cshtml`: Authenticated user indicator and sign-out form.
+- `.github/workflows/release.yml`: Release build, test, publish, ZIP, checksum, and GitHub Release workflow.
+- `deploy/`: LXC installation, systemd, persistent data, and Arr-style update scripts.
 
 The local SQLite database is `SafeSpend.Web/App_Data/safespend.db`. The `App_Data` directory is ignored by Git. It may be empty on a fresh machine and will be created on application startup.
 
@@ -105,6 +108,7 @@ git diff --check                                    # passes
 5. Exercise the connection flow at `/Plaid/Connect`: connect an Item, verify checking/savings balances, click sync, and confirm recent transactions appear on the dashboard. The first connection after this change must be linked again because older versions only kept the access token in memory. After connecting, the worker will sync on its schedule, and Plaid transaction webhooks will queue an earlier sync when configured.
 6. Create a paycheck schedule and at least one recurring bill, then verify that the forecast uses the connected checking/savings balance and expands upcoming bill occurrences.
 7. On a fresh Identity database, open `/Account/Setup`, create the administrator, verify redirect to the dashboard, sign out, and sign back in. Confirm that `/Account/Setup` no longer allows another account and that `/Account/Register` is unavailable.
+8. For an LXC deployment, follow [`deploy/README.md`](deploy/README.md), configure `/etc/safespend/safespend.env`, and test `sudo safespend-update` with a tagged GitHub Release.
 
 ## Planned next steps
 
