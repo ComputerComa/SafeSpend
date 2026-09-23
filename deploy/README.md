@@ -10,6 +10,33 @@ That directory is outside the versioned release folders, so updating the
 application does not reset the administrator account, Plaid connection, or
 encrypted access-token data.
 
+The application and Identity SQLite schemas are managed by EF Core migrations.
+Pending migrations run during startup before the service accepts requests. The
+first release using migrations safely adopts a complete database created by an
+older SafeSpend release. Back up `/var/lib/safespend` before an update that
+contains schema changes; switching the application symlink back does not undo
+an applied database migration.
+
+SafeSpend uses a stable ASP.NET Data Protection application name so encrypted
+Plaid access tokens remain readable after the release symlink changes. During
+an upgrade from an older release, the updater records retained release paths
+in `/var/lib/safespend/legacy-data-protection-applications`. If an access token
+uses one of those older path-based names, SafeSpend unlocks it and immediately
+re-encrypts it with the stable name. Keep `SAFESPEND_DATA_DIRECTORY` in
+`/etc/safespend/update.env` aligned with `SafeSpend__DataDirectory` in the
+service environment.
+
+If upgrading from a release whose updater predates this behavior, run the
+bootstrap command once after publishing the fixed release. This refreshes the
+host-level updater as well as the application:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ComputerComa/SafeSpend/master/install.sh | sudo bash
+```
+
+Newer updater versions replace `/usr/local/sbin/safespend-update` from each
+verified release package automatically.
+
 Application output is written to `/var/log/safespend/stdout.log` and
 `/var/log/safespend/stderr.log`. The installer adds a logrotate policy that
 rotates them daily or at 50 MB, retains 14 rotations, and compresses older

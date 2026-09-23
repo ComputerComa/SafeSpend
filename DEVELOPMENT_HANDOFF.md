@@ -27,6 +27,8 @@ The current flow is:
 13. A hosted worker performs an initial sync, then periodic cursor-based transaction syncs (60 minutes by default). Webhook-triggered syncs are queued and deduplicated, while per-user sync coordination prevents cursor races with manual syncs.
 14. `/api/plaid/webhook` verifies Plaid's `Plaid-Verification` ES256 signature and body hash using `/webhook_verification_key/get`. Transaction update webhooks queue a sync; Item recovery webhooks persist a non-secret `ActionRequired` status. Plaid Link uses update mode for an existing connection so the user can repair it.
 15. `.github/workflows/release.yml` publishes a versioned application ZIP and a `SafeSpend-latest.zip` asset on `v*` tag pushes. The root `install.sh` is a curl-pipe bootstrap; `deploy/` contains the systemd unit, persistent-data configuration, checksum-verified updater, and automatic rollback.
+16. Both SQLite databases now use checked-in EF Core migrations. On the first upgraded startup, a complete database created by the old `EnsureCreated` workflow is adopted as the initial migration without changing or deleting its data. Fresh databases are created by migrations, and later migrations are applied automatically before the web host starts.
+17. Data Protection uses the stable application name `SafeSpend`. The updater records old release-directory discriminators so a token encrypted by a previous path-based deployment can be unlocked once and immediately re-encrypted under the stable name.
 
 ## Important implementation locations
 
@@ -40,7 +42,9 @@ The current flow is:
 - `SafeSpend.Web/Services/Plaid/PlaidTransactionSyncWorker.cs`: Periodic and queued background transaction sync.
 - `SafeSpend.Web/Services/Plaid/PlaidWebhookVerifier.cs` and `PlaidWebhookService.cs`: Signed webhook verification, Item status handling, and sync queueing.
 - `SafeSpend.Web/Services/Plaid/IPlaidConnectionStore.cs` and `PlaidConnectionStore.cs`: Protected, user-keyed Plaid connection persistence.
-- `SafeSpend.Web/Services/Plaid/SafeSpendDatabaseInitializer.cs`: Creates the SQLite database and adds schedule tables for existing local databases.
+- `SafeSpend.Web/Data/Migrations/`: EF Core migrations and model snapshots for both the application and Identity contexts.
+- `SafeSpend.Web/Data/LegacyDatabaseMigrationAdopter.cs`: Validates and baselines databases created by the previous `EnsureCreated` workflow.
+- `SafeSpend.Web/Services/Plaid/SafeSpendDatabaseInitializer.cs` and `Services/Identity/IdentityDatabaseInitializer.cs`: Apply pending migrations at startup.
 - `SafeSpend.Web/Services/Forecasting/`: Paycheck and bill schedule models, persistence, recurrence expansion, and forecast services.
 - `SafeSpend.Web/Pages/Index.cshtml` and `Index.cshtml.cs`: Read-oriented dashboard, account-backed forecast, and recent transactions.
 - `SafeSpend.Web/Pages/Setup.cshtml` and `Setup.cshtml.cs`: Plaid setup entry point, paycheck schedule, and bill schedule management.
@@ -54,7 +58,7 @@ The local SQLite database is `SafeSpend.Web/App_Data/safespend.db`. The `App_Dat
 
 ## Tests and validation
 
-The current test suite contains 16 passing tests covering:
+The current test suite contains 20 passing tests covering:
 
 - Plaid account filtering and mapping.
 - Multi-page transaction sync and cursor persistence.
@@ -66,16 +70,16 @@ The current test suite contains 16 passing tests covering:
 - Paycheck and bill schedule persistence.
 - First-user administrator creation and registration shutdown after setup.
 - Plaid webhook signature verification, transaction sync queueing, and Item recovery status.
+- Fresh EF Core migration-based database creation, safe legacy database adoption, data preservation, and rejection of incomplete legacy schemas.
+- Recovery and re-encryption of a Plaid token protected with a legacy release-path Data Protection discriminator.
 
 Validated commands:
 
 ```text
-dotnet build SafeSpend.Web/SafeSpend.Web.csproj     # passes
-dotnet test SafeSpend.slnx                          # 16 passed
+dotnet build SafeSpend.slnx                         # passes
+dotnet test SafeSpend.slnx                          # 20 passed
 git diff --check                                    # passes
 ```
-
-`dotnet build SafeSpend.slnx` was also run as requested. In the current environment it exits during restore before project compilation because the installed SDK is missing `Microsoft.NET.SDK.WorkloadAutoImportPropsLocator` and `Microsoft.NET.SDK.WorkloadManifestTargetsLocator`. The individual web project build and the solution test command both compile successfully.
 
 ## Continuing on the home PC
 
@@ -105,16 +109,16 @@ git diff --check                                    # passes
    ```
 
    Production startup rejects a missing or non-HTTPS webhook URL. A local-only app can still use the periodic worker; Plaid cannot deliver production webhooks to an address that is not publicly reachable over HTTPS.
-5. Exercise the connection flow at `/Plaid/Connect`: connect an Item, verify checking/savings balances, click sync, and confirm recent transactions appear on the dashboard. The first connection after this change must be linked again because older versions only kept the access token in memory. After connecting, the worker will sync on its schedule, and Plaid transaction webhooks will queue an earlier sync when configured.
+5. Exercise the connection flow at `/Plaid/Connect`: connect an Item, verify checking/savings balances, click sync, and confirm recent transactions appear on the dashboard. After connecting, the worker will sync on its schedule, and Plaid transaction webhooks will queue an earlier sync when configured.
 6. Create a paycheck schedule and at least one recurring bill, then verify that the forecast uses the connected checking/savings balance and expands upcoming bill occurrences.
 7. On a fresh Identity database, open `/Account/Setup`, create the administrator, verify redirect to the dashboard, sign out, and sign back in. Confirm that `/Account/Setup` no longer allows another account and that `/Account/Register` is unavailable.
 8. For an LXC deployment, follow [`deploy/README.md`](deploy/README.md), configure `/etc/safespend/safespend.env`, and test `sudo safespend-update` with a tagged GitHub Release.
 
 ## Planned next steps
 
-### 1. Add migrations
+### 1. Add bill reminders via SMTP
 
-Replace the startup table-creation compatibility code with a real EF Core migration workflow once the schema settles. Keep the local `App_Data` database out of source control.
+Add reminder lead times to bill schedules, persist sent-reminder records to avoid duplicates, and send due reminders from a hosted worker. Store SMTP credentials only in user-secrets or `/etc/safespend/safespend.env`.
 
 ### 2. Use transaction history for forecasting improvements
 
@@ -127,6 +131,18 @@ Plaid connections are now user-keyed, but schedules and transaction rows still r
 ### 4. Add production safeguards and UI polish
 
 Add authorization and per-user ownership before supporting multiple users, improve error and sync status messaging, add pagination/filtering for transaction history, and add tests for Plaid API error responses and duplicate sync events.
+
+## EF Core schema changes
+
+After changing either EF model, create and review a migration from the repository root:
+
+```text
+dotnet tool restore
+dotnet ef migrations add <MigrationName> --project SafeSpend.Web/SafeSpend.Web.csproj --startup-project SafeSpend.Web/SafeSpend.Web.csproj --context SafeSpendDbContext --output-dir Data/Migrations/SafeSpend
+dotnet ef migrations add <MigrationName> --project SafeSpend.Web/SafeSpend.Web.csproj --startup-project SafeSpend.Web/SafeSpend.Web.csproj --context SafeSpendIdentityDbContext --output-dir Data/Migrations/Identity
+```
+
+Run only the command for the context that changed. Do not use `EnsureCreated`, manually edit a deployed SQLite schema, or remove an applied migration. Startup applies pending migrations before accepting requests. Back up `/var/lib/safespend` before deploying releases that contain schema changes because rolling application files back does not reverse a database migration.
 
 ## Working rules
 

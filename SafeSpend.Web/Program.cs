@@ -85,7 +85,8 @@ var dataDirectory = Path.Combine(
     builder.Configuration["SafeSpend:DataDirectory"] ?? "App_Data");
 Directory.CreateDirectory(dataDirectory);
 var dataProtectionBuilder = builder.Services.AddDataProtection()
-    .PersistKeysToFileSystem(new DirectoryInfo(dataDirectory));
+    .PersistKeysToFileSystem(new DirectoryInfo(dataDirectory))
+    .SetApplicationName("SafeSpend");
 if (OperatingSystem.IsWindows())
 {
     dataProtectionBuilder.ProtectKeysWithDpapi();
@@ -106,6 +107,17 @@ builder.Services.AddSingleton<IPlaidSyncQueue, PlaidSyncQueue>();
 builder.Services.AddScoped<IPlaidWebhookVerifier, PlaidWebhookVerifier>();
 builder.Services.AddScoped<PlaidWebhookService>();
 builder.Services.AddScoped<ICurrentUserContext, CurrentUserContext>();
+builder.Services.AddSingleton<ILegacyPlaidAccessTokenProtector>(
+    _ => new LegacyPlaidAccessTokenProtector(
+        dataDirectory,
+        LegacyPlaidAccessTokenProtector.LoadApplicationNames(
+            Path.Combine(
+                dataDirectory,
+                "legacy-data-protection-applications"),
+            builder.Configuration.GetSection(
+                    "SafeSpend:LegacyDataProtectionApplicationNames")
+                .Get<string[]>() ?? [],
+            builder.Environment.ContentRootPath)));
 builder.Services.AddScoped<IPlaidConnectionStore, PlaidConnectionStore>();
 builder.Services.AddSingleton<IPlaidTransactionStore, PlaidTransactionStore>();
 builder.Services.AddSingleton<IForecastScheduleStore, ForecastScheduleStore>();

@@ -4,23 +4,35 @@ using Microsoft.EntityFrameworkCore;
 
 namespace SafeSpend.Web.Services.Plaid;
 
-public sealed class PlaidConnectionStore(
-    IDbContextFactory<SafeSpendDbContext> contextFactory,
-    IDataProtectionProvider dataProtectionProvider)
-    : IPlaidConnectionStore
+public sealed class PlaidConnectionStore : IPlaidConnectionStore
 {
+    public const string ApplicationName = "SafeSpend";
+    public const string AccessTokenPurpose =
+        "SafeSpend.PlaidAccessToken.v1";
+
+    private readonly IDbContextFactory<SafeSpendDbContext> _contextFactory;
+    private readonly ILegacyPlaidAccessTokenProtector _legacyProtector;
     private readonly IDataProtector _accessTokenProtector =
-        dataProtectionProvider.CreateProtector(
-            "SafeSpend.PlaidAccessToken.v1");
+        null!;
+
+    public PlaidConnectionStore(
+        IDbContextFactory<SafeSpendDbContext> contextFactory,
+        IDataProtectionProvider dataProtectionProvider,
+        ILegacyPlaidAccessTokenProtector legacyProtector)
+    {
+        _contextFactory = contextFactory;
+        _legacyProtector = legacyProtector;
+        _accessTokenProtector = dataProtectionProvider.CreateProtector(
+            AccessTokenPurpose);
+    }
 
     public async Task<PlaidConnection?> GetAsync(string userId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
 
         await using var context =
-            await contextFactory.CreateDbContextAsync();
+            await _contextFactory.CreateDbContextAsync();
         var entity = await context.PlaidConnections
-            .AsNoTracking()
             .SingleOrDefaultAsync(row => row.UserId == userId);
 
         if (entity is null)
@@ -28,21 +40,7 @@ public sealed class PlaidConnectionStore(
             return null;
         }
 
-        string accessToken;
-        try
-        {
-            accessToken = _accessTokenProtector.Unprotect(
-                entity.ProtectedAccessToken);
-        }
-        catch (Exception exception) when (
-            exception is CryptographicException ||
-            exception is ArgumentException)
-        {
-            throw new InvalidOperationException(
-                "The stored Plaid connection could not be unlocked.",
-                exception);
-        }
-
+        var accessToken = await UnprotectAsync(context, entity);
         return Map(entity, accessToken);
     }
 
@@ -51,23 +49,31 @@ public sealed class PlaidConnectionStore(
         ArgumentException.ThrowIfNullOrWhiteSpace(itemId);
 
         await using var context =
-            await contextFactory.CreateDbContextAsync();
+            await _contextFactory.CreateDbContextAsync();
         var entity = await context.PlaidConnections
-            .AsNoTracking()
             .SingleOrDefaultAsync(row => row.ItemId == itemId);
 
-        return entity is null ? null : Map(entity);
+        return entity is null
+            ? null
+            : Map(entity, await UnprotectAsync(context, entity));
     }
 
     public async Task<IReadOnlyList<PlaidConnection>> GetAllAsync()
     {
         await using var context =
-            await contextFactory.CreateDbContextAsync();
+            await _contextFactory.CreateDbContextAsync();
         var entities = await context.PlaidConnections
-            .AsNoTracking()
             .ToListAsync();
 
-        return entities.Select(Map).ToArray();
+        var connections = new List<PlaidConnection>(entities.Count);
+        foreach (var entity in entities)
+        {
+            connections.Add(Map(
+                entity,
+                await UnprotectAsync(context, entity)));
+        }
+
+        return connections;
     }
 
     public async Task SaveAsync(
@@ -81,7 +87,7 @@ public sealed class PlaidConnectionStore(
         ArgumentException.ThrowIfNullOrWhiteSpace(accessToken);
 
         await using var context =
-            await contextFactory.CreateDbContextAsync();
+            await _contextFactory.CreateDbContextAsync();
         var entity = await context.PlaidConnections
             .SingleOrDefaultAsync(row => row.UserId == userId);
 
@@ -115,7 +121,7 @@ public sealed class PlaidConnectionStore(
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
 
         await using var context =
-            await contextFactory.CreateDbContextAsync();
+            await _contextFactory.CreateDbContextAsync();
         var entity = await context.PlaidConnections
             .SingleOrDefaultAsync(row => row.UserId == userId);
 
@@ -140,7 +146,7 @@ public sealed class PlaidConnectionStore(
         ArgumentException.ThrowIfNullOrWhiteSpace(webhookCode);
 
         await using var context =
-            await contextFactory.CreateDbContextAsync();
+            await _contextFactory.CreateDbContextAsync();
         var entity = await context.PlaidConnections
             .SingleOrDefaultAsync(row => row.UserId == userId);
 
@@ -160,7 +166,7 @@ public sealed class PlaidConnectionStore(
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
 
         await using var context =
-            await contextFactory.CreateDbContextAsync();
+            await _contextFactory.CreateDbContextAsync();
         var entity = await context.PlaidConnections
             .SingleOrDefaultAsync(row => row.UserId == userId);
 
@@ -173,24 +179,32 @@ public sealed class PlaidConnectionStore(
         await context.SaveChangesAsync();
     }
 
-    private PlaidConnection Map(PlaidConnectionEntity entity)
+    private async Task<string> UnprotectAsync(
+        SafeSpendDbContext context,
+        PlaidConnectionEntity entity)
     {
-        string accessToken;
         try
         {
-            accessToken = _accessTokenProtector.Unprotect(
+            return _accessTokenProtector.Unprotect(
                 entity.ProtectedAccessToken);
         }
         catch (Exception exception) when (
-            exception is CryptographicException ||
-            exception is ArgumentException)
+            exception is CryptographicException or ArgumentException)
         {
+            if (_legacyProtector.TryUnprotect(
+                    entity.ProtectedAccessToken,
+                    out var legacyAccessToken))
+            {
+                entity.ProtectedAccessToken = _accessTokenProtector.Protect(
+                    legacyAccessToken);
+                await context.SaveChangesAsync();
+                return legacyAccessToken;
+            }
+
             throw new InvalidOperationException(
                 "The stored Plaid connection could not be unlocked.",
                 exception);
         }
-
-        return Map(entity, accessToken);
     }
 
     private static PlaidConnection Map(

@@ -33,7 +33,7 @@ public sealed class IdentitySetupServiceTests
             {
                 var context = scope.ServiceProvider
                     .GetRequiredService<SafeSpendIdentityDbContext>();
-                await context.Database.EnsureCreatedAsync();
+                await IdentityDatabaseInitializer.InitializeAsync(context);
 
                 var setupService = scope.ServiceProvider
                     .GetRequiredService<IdentitySetupService>();

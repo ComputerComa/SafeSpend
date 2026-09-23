@@ -14,6 +14,7 @@ app_root="${SAFESPEND_APP_ROOT:-/opt/safespend}"
 service_name="${SAFESPEND_SERVICE:-safespend}"
 app_user="${SAFESPEND_USER:-safespend}"
 app_group="${SAFESPEND_GROUP:-$app_user}"
+data_directory="${SAFESPEND_DATA_DIRECTORY:-/var/lib/safespend}"
 keep_releases="${SAFESPEND_KEEP_RELEASES:-3}"
 requested_version="${1:-latest}"
 
@@ -94,12 +95,39 @@ if [[ -f "$release_directory/deploy/safespend.logrotate" ]]; then
         "$release_directory/deploy/safespend.logrotate" \
         /etc/logrotate.d/safespend
 fi
+if [[ -f "$release_directory/deploy/safespend-update.sh" ]]; then
+    install -o root -g root -m 0755 \
+        "$release_directory/deploy/safespend-update.sh" \
+        /usr/local/sbin/safespend-update
+fi
 systemctl daemon-reload
 
 previous_target=""
 if [[ -L "$current_link" ]]; then
     previous_target="$(readlink -f "$current_link")"
 fi
+
+# Older releases used the resolved content-root path as the ASP.NET Data
+# Protection application discriminator. Preserve every known release path so
+# the new application can unlock a legacy Plaid token once and immediately
+# re-protect it with the stable SafeSpend discriminator.
+legacy_names_file="$data_directory/legacy-data-protection-applications"
+legacy_names_staging="$temporary_directory/legacy-data-protection-applications"
+install -d -o "$app_user" -g "$app_group" -m 0750 "$data_directory"
+if [[ -f "$legacy_names_file" ]]; then
+    cp "$legacy_names_file" "$legacy_names_staging"
+else
+    : > "$legacy_names_staging"
+fi
+printf '%s\n%s/\n' "$current_link" "$current_link" \
+    >> "$legacy_names_staging"
+while IFS= read -r release_path; do
+    printf '%s\n%s/\n' "$release_path" "$release_path" \
+        >> "$legacy_names_staging"
+done < <(find "$releases_directory" -mindepth 1 -maxdepth 1 -type d)
+sort -u "$legacy_names_staging" -o "$legacy_names_staging"
+install -o "$app_user" -g "$app_group" -m 0600 \
+    "$legacy_names_staging" "$legacy_names_file"
 
 new_link="$app_root/.current-$$"
 ln -s "$release_directory" "$new_link"

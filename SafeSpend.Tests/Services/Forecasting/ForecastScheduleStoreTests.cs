@@ -21,7 +21,7 @@ public sealed class ForecastScheduleStoreTests
 
             await using (var context = new SafeSpendDbContext(options))
             {
-                await context.Database.EnsureCreatedAsync();
+                await SafeSpendDatabaseInitializer.InitializeAsync(context);
             }
 
             var store = new ForecastScheduleStore(

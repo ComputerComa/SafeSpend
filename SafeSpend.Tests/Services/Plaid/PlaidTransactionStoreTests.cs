@@ -20,7 +20,7 @@ public sealed class PlaidTransactionStoreTests
 
             await using (var context = new SafeSpendDbContext(options))
             {
-                await context.Database.EnsureCreatedAsync();
+                await SafeSpendDatabaseInitializer.InitializeAsync(context);
             }
 
             var factory = new TestDbContextFactory(options);
