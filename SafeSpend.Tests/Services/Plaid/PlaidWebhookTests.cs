@@ -169,6 +169,9 @@ public sealed class PlaidWebhookTests
             Task.FromResult<IReadOnlyList<PlaidConnection>>(
                 Connection is null ? [] : [Connection]);
 
+        public Task<string?> GetItemIdAsync(string userId) =>
+            Task.FromResult(Connection?.ItemId);
+
         public Task SaveAsync(
             string userId,
             string itemId,

@@ -12,14 +12,28 @@ if ! command -v logrotate >/dev/null 2>&1; then
 fi
 
 script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+config_file="${SAFESPEND_UPDATE_CONFIG:-/etc/safespend/update.env}"
+if [[ -f "$config_file" ]]; then
+    # This file contains host deployment settings, never application secrets.
+    # shellcheck disable=SC1090
+    source "$config_file"
+fi
+
 app_root="${SAFESPEND_APP_ROOT:-/opt/safespend}"
 app_user="${SAFESPEND_USER:-safespend}"
 app_group="${SAFESPEND_GROUP:-$app_user}"
+data_directory="${SAFESPEND_DATA_DIRECTORY:-/var/lib/safespend}"
 service_name="${SAFESPEND_SERVICE:-safespend}"
 repository="${SAFESPEND_REPOSITORY:-ComputerComa/SafeSpend}"
+replace_service="${SAFESPEND_REPLACE_SERVICE:-false}"
 
 if [[ ! "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
     echo "SAFESPEND_REPOSITORY must look like owner/repository." >&2
+    exit 1
+fi
+
+if [[ "$data_directory" != /* || "$data_directory" == "/" ]]; then
+    echo "SAFESPEND_DATA_DIRECTORY must be a dedicated absolute path." >&2
     exit 1
 fi
 
@@ -33,14 +47,20 @@ install -d -o root -g root -m 0755 \
     "$app_root/releases" \
     "/etc/safespend"
 install -d -o "$app_user" -g "$app_group" -m 0750 \
-    "/var/lib/safespend"
+    "$data_directory"
+chown -R -- "$app_user:$app_group" "$data_directory"
 
 install -o root -g root -m 0755 \
     "$script_directory/safespend-update.sh" \
     /usr/local/sbin/safespend-update
-install -o root -g root -m 0644 \
-    "$script_directory/safespend.service" \
-    "/etc/systemd/system/$service_name.service"
+service_file="/etc/systemd/system/$service_name.service"
+if [[ ! -f "$service_file" || "$replace_service" == "true" ]]; then
+    install -o root -g root -m 0644 \
+        "$script_directory/safespend.service" \
+        "$service_file"
+else
+    echo "Preserving existing systemd unit: $service_file"
+fi
 install -o root -g root -m 0644 \
     "$script_directory/safespend.logrotate" \
     /etc/logrotate.d/safespend

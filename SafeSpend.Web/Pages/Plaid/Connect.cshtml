@@ -12,7 +12,26 @@
     </p>
 </div>
 
-@if (Model.IsConnected)
+@if (Model.IsConnectionUnavailable)
+{
+    <div class="alert alert-danger" role="alert">
+        <p>@Model.AccountLoadError</p>
+        <p>
+            If the old key cannot be restored, remove the unreadable local
+            connection and connect the bank again. SafeSpend cannot notify
+            Plaid about the old Item because its access token is unavailable.
+        </p>
+        <form method="post"
+              asp-page-handler="ForgetUnavailableConnection"
+              onsubmit="return window.confirm('Remove the unreadable local Plaid connection and its imported transactions?');">
+            <button class="btn btn-danger" type="submit">
+                Remove local connection
+            </button>
+        </form>
+    </div>
+}
+
+@if (Model.IsConnected && !Model.IsConnectionUnavailable)
 {
     <div class="alert alert-success">
         Plaid is connected.
@@ -114,11 +133,14 @@
     @Html.AntiForgeryToken()
 </form>
 
-<button id="connect-plaid"
-        class="btn btn-primary"
-        type="button">
-    @(Model.IsConnected ? "Update bank connection" : "Connect with Plaid")
-</button>
+@if (!Model.IsConnectionUnavailable)
+{
+    <button id="connect-plaid"
+            class="btn btn-primary"
+            type="button">
+        @(Model.IsConnected ? "Update bank connection" : "Connect with Plaid")
+    </button>
+}
 
 <div id="plaid-status"
      class="alert mt-3 d-none"
@@ -177,7 +199,7 @@
                 return result;
             }
 
-            connectButton.addEventListener("click", async () => {
+            connectButton?.addEventListener("click", async () => {
                 connectButton.disabled = true;
                 showStatus("Creating Plaid Link session…", "info");
 

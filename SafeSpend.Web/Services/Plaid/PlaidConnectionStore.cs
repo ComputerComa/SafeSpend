@@ -12,16 +12,19 @@ public sealed class PlaidConnectionStore : IPlaidConnectionStore
 
     private readonly IDbContextFactory<SafeSpendDbContext> _contextFactory;
     private readonly ILegacyPlaidAccessTokenProtector _legacyProtector;
+    private readonly ILogger<PlaidConnectionStore> _logger;
     private readonly IDataProtector _accessTokenProtector =
         null!;
 
     public PlaidConnectionStore(
         IDbContextFactory<SafeSpendDbContext> contextFactory,
         IDataProtectionProvider dataProtectionProvider,
-        ILegacyPlaidAccessTokenProtector legacyProtector)
+        ILegacyPlaidAccessTokenProtector legacyProtector,
+        ILogger<PlaidConnectionStore> logger)
     {
         _contextFactory = contextFactory;
         _legacyProtector = legacyProtector;
+        _logger = logger;
         _accessTokenProtector = dataProtectionProvider.CreateProtector(
             AccessTokenPurpose);
     }
@@ -74,6 +77,18 @@ public sealed class PlaidConnectionStore : IPlaidConnectionStore
         }
 
         return connections;
+    }
+
+    public async Task<string?> GetItemIdAsync(string userId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
+
+        await using var context =
+            await _contextFactory.CreateDbContextAsync();
+        return await context.PlaidConnections
+            .Where(row => row.UserId == userId)
+            .Select(row => row.ItemId)
+            .SingleOrDefaultAsync();
     }
 
     public async Task SaveAsync(
@@ -198,10 +213,20 @@ public sealed class PlaidConnectionStore : IPlaidConnectionStore
                 entity.ProtectedAccessToken = _accessTokenProtector.Protect(
                     legacyAccessToken);
                 await context.SaveChangesAsync();
+                _logger.LogInformation(
+                    "Recovered and re-protected a Plaid connection using " +
+                    "legacy Data Protection configuration.");
                 return legacyAccessToken;
             }
 
-            throw new InvalidOperationException(
+            _logger.LogWarning(
+                "Unable to recover a Plaid connection after trying " +
+                "{CandidateCount} legacy Data Protection combinations " +
+                "across {KeyDirectoryCount} key directories.",
+                _legacyProtector.CandidateCount,
+                _legacyProtector.KeyDirectoryCount);
+
+            throw new PlaidConnectionUnavailableException(
                 "The stored Plaid connection could not be unlocked.",
                 exception);
         }

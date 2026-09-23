@@ -5,6 +5,10 @@ namespace SafeSpend.Web.Services.Plaid;
 
 public interface ILegacyPlaidAccessTokenProtector
 {
+    int CandidateCount { get; }
+
+    int KeyDirectoryCount { get; }
+
     bool TryUnprotect(string protectedAccessToken, out string accessToken);
 }
 
@@ -15,37 +19,60 @@ public sealed class LegacyPlaidAccessTokenProtector :
     private readonly IReadOnlyList<IDataProtectionProvider> _providers;
     private readonly IReadOnlyList<IDataProtector> _protectors;
 
+    public int CandidateCount => _protectors.Count;
+
+    public int KeyDirectoryCount { get; }
+
     public LegacyPlaidAccessTokenProtector(
         string keyDirectory,
         IEnumerable<string> applicationNames)
+        : this([keyDirectory], applicationNames)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(keyDirectory);
+    }
+
+    public LegacyPlaidAccessTokenProtector(
+        IEnumerable<string> keyDirectories,
+        IEnumerable<string> applicationNames)
+    {
+        ArgumentNullException.ThrowIfNull(keyDirectories);
         ArgumentNullException.ThrowIfNull(applicationNames);
 
         var names = applicationNames
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .SelectMany(GetApplicationNameVariants)
-            .Where(name => !string.Equals(
-                name,
-                PlaidConnectionStore.ApplicationName,
-                StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var directories = keyDirectories
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .Where(Directory.Exists)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
-        var providers = new List<IDataProtectionProvider>(names.Length);
-        var protectors = new List<IDataProtector>(names.Length);
-        foreach (var name in names)
+        var providers = new List<IDataProtectionProvider>();
+        var protectors = new List<IDataProtector>();
+        foreach (var directory in directories)
         {
-            var provider = DataProtectionProvider.Create(
-                new DirectoryInfo(keyDirectory),
-                builder => builder.SetApplicationName(name));
-            providers.Add(provider);
-            protectors.Add(provider.CreateProtector(
+            var unisolatedProvider = DataProtectionProvider.Create(
+                new DirectoryInfo(directory));
+            providers.Add(unisolatedProvider);
+            protectors.Add(unisolatedProvider.CreateProtector(
                 PlaidConnectionStore.AccessTokenPurpose));
+
+            foreach (var name in names)
+            {
+                var provider = DataProtectionProvider.Create(
+                    new DirectoryInfo(directory),
+                    builder => builder.SetApplicationName(name));
+                providers.Add(provider);
+                protectors.Add(provider.CreateProtector(
+                    PlaidConnectionStore.AccessTokenPurpose));
+            }
         }
 
         _providers = providers;
         _protectors = protectors;
+        KeyDirectoryCount = directories.Length;
     }
 
     public bool TryUnprotect(
@@ -102,6 +129,68 @@ public sealed class LegacyPlaidAccessTokenProtector :
         return names;
     }
 
+    public static IReadOnlyList<string> LoadKeyDirectories(
+        string primaryKeyDirectory,
+        string contentRootPath,
+        IEnumerable<string>? configuredDirectories = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(primaryKeyDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(contentRootPath);
+
+        var directories = new HashSet<string>(StringComparer.Ordinal)
+        {
+            Path.GetFullPath(primaryKeyDirectory)
+        };
+        if (configuredDirectories is not null)
+        {
+            foreach (var configuredDirectory in configuredDirectories
+                         .Where(path => !string.IsNullOrWhiteSpace(path)))
+            {
+                directories.Add(Path.GetFullPath(configuredDirectory));
+            }
+        }
+
+        try
+        {
+            AddKeyDirectories(
+                directories,
+                new DirectoryInfo(primaryKeyDirectory));
+
+            foreach (var release in GetRetainedReleaseDirectories(
+                         contentRootPath))
+            {
+                AddKeyDirectories(directories, release);
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            // The primary persistent key directory remains available.
+        }
+
+        return directories.ToArray();
+    }
+
+    private static void AddKeyDirectories(
+        ISet<string> directories,
+        DirectoryInfo root)
+    {
+        if (!root.Exists)
+        {
+            return;
+        }
+
+        foreach (var keyFile in root.EnumerateFiles(
+                     "key-*.xml",
+                     SearchOption.AllDirectories))
+        {
+            if (keyFile.Directory is not null)
+            {
+                directories.Add(keyFile.Directory.FullName);
+            }
+        }
+    }
+
     private static void AddRetainedReleasePaths(
         ICollection<string> names,
         string contentRootPath)
@@ -116,42 +205,10 @@ public sealed class LegacyPlaidAccessTokenProtector :
                 names.Add(resolvedRoot.FullName);
             }
 
-            var releaseDirectories = new List<DirectoryInfo>();
-            var contentRootParent = contentRoot.Parent;
-            if (string.Equals(
-                    contentRootParent?.Name,
-                    "releases",
-                    StringComparison.OrdinalIgnoreCase))
+            foreach (var release in GetRetainedReleaseDirectories(
+                         contentRootPath))
             {
-                releaseDirectories.Add(contentRootParent!);
-            }
-
-            var siblingReleases = contentRootParent is null
-                ? null
-                : new DirectoryInfo(Path.Combine(
-                    contentRootParent.FullName,
-                    "releases"));
-            if (siblingReleases?.Exists == true)
-            {
-                releaseDirectories.Add(siblingReleases);
-            }
-
-            if (resolvedRoot?.Parent is not null &&
-                string.Equals(
-                    resolvedRoot.Parent.Name,
-                    "releases",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                releaseDirectories.Add(resolvedRoot.Parent);
-            }
-
-            foreach (var releases in releaseDirectories
-                         .DistinctBy(directory => directory.FullName))
-            {
-                foreach (var release in releases.EnumerateDirectories())
-                {
-                    names.Add(release.FullName);
-                }
+                names.Add(release.FullName);
             }
         }
         catch (Exception exception) when (
@@ -159,6 +216,49 @@ public sealed class LegacyPlaidAccessTokenProtector :
         {
             // Explicitly configured names and the compatibility file remain
             // available when release-directory discovery is unavailable.
+        }
+    }
+
+    private static IReadOnlyList<DirectoryInfo>
+        GetRetainedReleaseDirectories(string contentRootPath)
+    {
+        var contentRoot = new DirectoryInfo(contentRootPath);
+        var resolvedRoot = contentRoot.ResolveLinkTarget(
+            returnFinalTarget: true) as DirectoryInfo;
+        var releaseRoots = new List<DirectoryInfo>();
+
+        AddReleaseRoot(releaseRoots, contentRoot.Parent);
+        AddReleaseRoot(releaseRoots, resolvedRoot?.Parent);
+
+        if (contentRoot.Parent is not null)
+        {
+            var siblingReleases = new DirectoryInfo(Path.Combine(
+                contentRoot.Parent.FullName,
+                "releases"));
+            if (siblingReleases.Exists)
+            {
+                releaseRoots.Add(siblingReleases);
+            }
+        }
+
+        return releaseRoots
+            .DistinctBy(directory => directory.FullName)
+            .SelectMany(directory => directory.EnumerateDirectories())
+            .DistinctBy(directory => directory.FullName)
+            .ToArray();
+    }
+
+    private static void AddReleaseRoot(
+        ICollection<DirectoryInfo> releaseRoots,
+        DirectoryInfo? candidate)
+    {
+        if (candidate is not null &&
+            string.Equals(
+                candidate.Name,
+                "releases",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            releaseRoots.Add(candidate);
         }
     }
 

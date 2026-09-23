@@ -41,12 +41,22 @@ jobs:
           set -euo pipefail
 
           publish_dir="$RUNNER_TEMP/safespend-publish"
+          release_version="${GITHUB_REF_NAME#v}"
           rm -rf "$publish_dir"
 
           dotnet publish SafeSpend.Web/SafeSpend.Web.csproj \
             --configuration Release \
             --no-restore \
+            -p:Version="$release_version" \
+            -p:InformationalVersion="${GITHUB_REF_NAME}+${GITHUB_SHA}" \
+            -p:IncludeSourceRevisionInInformationalVersion=false \
             --output "$publish_dir"
+
+          {
+            echo "version=${GITHUB_REF_NAME}"
+            echo "commit=${GITHUB_SHA}"
+            echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$publish_dir/VERSION"
 
           # Deployment helpers contain no credentials and make the release
           # self-documenting when it is downloaded onto the LXC host.

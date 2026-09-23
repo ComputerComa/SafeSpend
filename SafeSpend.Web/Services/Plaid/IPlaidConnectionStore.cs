@@ -8,6 +8,8 @@ public interface IPlaidConnectionStore
 
     Task<IReadOnlyList<PlaidConnection>> GetAllAsync();
 
+    Task<string?> GetItemIdAsync(string userId);
+
     Task SaveAsync(
         string userId,
         string itemId,

@@ -213,6 +213,24 @@ public sealed class PlaidLinkServiceTests
         Assert.True(transactionStore.WasDeleted);
     }
 
+    [Fact]
+    public async Task ForgetUnavailableConnectionAsync_RemovesOnlyLocalData()
+    {
+        var plaidApi = new FakePlaidApi();
+        var transactionStore = new FakePlaidTransactionStore();
+        var connectionStore = CreateConnectedStore();
+        var service = CreateService(
+            plaidApi,
+            transactionStore,
+            connectionStore);
+
+        await service.ForgetUnavailableConnectionAsync();
+
+        Assert.Null(plaidApi.RemovedAccessToken);
+        Assert.Null(connectionStore.Connection);
+        Assert.True(transactionStore.WasDeleted);
+    }
+
     private static PlaidLinkService CreateService(
         IPlaidApi plaidApi,
         FakePlaidTransactionStore transactionStore,
@@ -309,6 +327,9 @@ public sealed class PlaidLinkServiceTests
         public Task<IReadOnlyList<PlaidConnection>> GetAllAsync() =>
             Task.FromResult<IReadOnlyList<PlaidConnection>>(
                 Connection is null ? [] : [Connection]);
+
+        public Task<string?> GetItemIdAsync(string userId) =>
+            Task.FromResult(Connection?.ItemId);
 
         public Task SaveAsync(
             string userId,

@@ -16,6 +16,8 @@ public sealed class ConnectModel(
 
     public bool IsConnected { get; private set; }
 
+    public bool IsConnectionUnavailable { get; private set; }
+
     public string ConnectionStatus { get; private set; } = "Disconnected";
 
     public async Task OnGetAsync()
@@ -145,10 +147,42 @@ public sealed class ConnectModel(
         }
     }
 
+    public async Task<IActionResult> OnPostForgetUnavailableConnectionAsync()
+    {
+        try
+        {
+            await plaidLinkService.ForgetUnavailableConnectionAsync();
+            return RedirectToPage();
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                "Unable to forget an unavailable Plaid connection. " +
+                "Error type: {ErrorType}",
+                exception.GetType().Name);
+            AccountLoadError =
+                "The unavailable local connection could not be removed.";
+            IsConnectionUnavailable = true;
+            return Page();
+        }
+    }
+
     private async Task LoadConnectionAsync()
     {
-        IsConnected = await plaidLinkService.IsConnectedAsync();
-        ConnectionStatus = await plaidLinkService.GetConnectionStatusAsync();
+        try
+        {
+            IsConnected = await plaidLinkService.IsConnectedAsync();
+            ConnectionStatus = await plaidLinkService
+                .GetConnectionStatusAsync();
+        }
+        catch (PlaidConnectionUnavailableException)
+        {
+            IsConnectionUnavailable = true;
+            AccountLoadError =
+                "SafeSpend cannot unlock the saved Plaid connection. " +
+                "It may have been encrypted with a Data Protection key " +
+                "that is no longer available.";
+        }
     }
 
     public sealed record ExchangePublicTokenRequest(

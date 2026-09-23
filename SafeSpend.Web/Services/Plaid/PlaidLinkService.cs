@@ -177,6 +177,24 @@ public sealed class PlaidLinkService(
             });
     }
 
+    public async Task ForgetUnavailableConnectionAsync()
+    {
+        var userId = currentUser.GetRequiredUserId();
+        await syncCoordinator.RunAsync(
+            userId,
+            async () =>
+            {
+                var itemId = await connectionStore.GetItemIdAsync(userId);
+                if (!string.IsNullOrWhiteSpace(itemId))
+                {
+                    await transactionStore.DeleteAsync(itemId);
+                }
+
+                await connectionStore.DeleteAsync(userId);
+                return true;
+            });
+    }
+
     private async Task<PlaidConnection> GetRequiredConnectionAsync()
     {
         var connection = await connectionStore.GetAsync(

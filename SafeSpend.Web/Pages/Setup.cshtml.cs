@@ -126,8 +126,18 @@ public sealed class SetupModel : PageModel
 
     private async Task LoadSetupAsync(bool populateInputs)
     {
-        IsPlaidConnected = await _plaidLinkService.IsConnectedAsync();
-        ConnectionStatus = await _plaidLinkService.GetConnectionStatusAsync();
+        try
+        {
+            IsPlaidConnected = await _plaidLinkService.IsConnectedAsync();
+            ConnectionStatus = await _plaidLinkService
+                .GetConnectionStatusAsync();
+        }
+        catch (PlaidConnectionUnavailableException)
+        {
+            PlaidError =
+                "SafeSpend cannot unlock the saved Plaid connection. " +
+                "Open the Plaid connection page to recover or reconnect it.";
+        }
 
         try
         {

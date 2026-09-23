@@ -125,7 +125,15 @@ public sealed class IndexModel : PageModel
             return;
         }
 
-        IsPlaidConnected = await _plaidLinkService.IsConnectedAsync();
+        try
+        {
+            IsPlaidConnected = await _plaidLinkService.IsConnectedAsync();
+        }
+        catch (PlaidConnectionUnavailableException)
+        {
+            PlaidDataError =
+                "SafeSpend cannot unlock the saved Plaid connection.";
+        }
 
         if (IsPlaidConnected)
         {

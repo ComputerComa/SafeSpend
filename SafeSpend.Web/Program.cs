@@ -109,7 +109,12 @@ builder.Services.AddScoped<PlaidWebhookService>();
 builder.Services.AddScoped<ICurrentUserContext, CurrentUserContext>();
 builder.Services.AddSingleton<ILegacyPlaidAccessTokenProtector>(
     _ => new LegacyPlaidAccessTokenProtector(
-        dataDirectory,
+        LegacyPlaidAccessTokenProtector.LoadKeyDirectories(
+            dataDirectory,
+            builder.Environment.ContentRootPath,
+            builder.Configuration.GetSection(
+                    "SafeSpend:LegacyDataProtectionKeyDirectories")
+                .Get<string[]>() ?? []),
         LegacyPlaidAccessTokenProtector.LoadApplicationNames(
             Path.Combine(
                 dataDirectory,

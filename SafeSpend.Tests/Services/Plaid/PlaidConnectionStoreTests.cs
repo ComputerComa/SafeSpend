@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using SafeSpend.Web.Services.Plaid;
 
 namespace SafeSpend.Tests.Services.Plaid;
@@ -33,7 +34,8 @@ public sealed class PlaidConnectionStoreTests
             var store = new PlaidConnectionStore(
                 new TestDbContextFactory(options),
                 dataProtectionProvider,
-                new LegacyPlaidAccessTokenProtector(keyPath, []));
+                new LegacyPlaidAccessTokenProtector(keyPath, []),
+                NullLogger<PlaidConnectionStore>.Instance);
 
             await store.SaveAsync(
                 "user-id",
@@ -88,12 +90,16 @@ public sealed class PlaidConnectionStoreTests
         var keyPath = Path.Combine(
             Path.GetTempPath(),
             $"safespend-legacy-keys-{Guid.NewGuid():N}");
+        var stableKeyPath = Path.Combine(
+            Path.GetTempPath(),
+            $"safespend-stable-keys-{Guid.NewGuid():N}");
         const string legacyApplicationName =
             "/opt/safespend/releases/v1.0.0/";
 
         try
         {
             Directory.CreateDirectory(keyPath);
+            Directory.CreateDirectory(stableKeyPath);
             var options = new DbContextOptionsBuilder<SafeSpendDbContext>()
                 .UseSqlite($"Data Source={databasePath}")
                 .Options;
@@ -120,17 +126,18 @@ public sealed class PlaidConnectionStoreTests
             }
 
             var stableProvider = DataProtectionProvider.Create(
-                new DirectoryInfo(keyPath),
+                new DirectoryInfo(stableKeyPath),
                 builder => builder.SetApplicationName(
                     PlaidConnectionStore.ApplicationName));
             using var legacyFallback =
                 new LegacyPlaidAccessTokenProtector(
-                    keyPath,
+                    [stableKeyPath, keyPath],
                     [legacyApplicationName]);
             var store = new PlaidConnectionStore(
                 new TestDbContextFactory(options),
                 stableProvider,
-                legacyFallback);
+                legacyFallback,
+                NullLogger<PlaidConnectionStore>.Instance);
 
             var connection = await store.GetAsync("user-id");
 
@@ -157,6 +164,60 @@ public sealed class PlaidConnectionStoreTests
             if (Directory.Exists(keyPath))
             {
                 Directory.Delete(keyPath, recursive: true);
+            }
+            if (Directory.Exists(stableKeyPath))
+            {
+                Directory.Delete(stableKeyPath, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void DiscoversKeyDirectoriesFromRetainedReleases()
+    {
+        var appRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"safespend-releases-{Guid.NewGuid():N}");
+        var primaryKeyPath = Path.Combine(appRoot, "persistent-data");
+        var currentRelease = Path.Combine(appRoot, "releases", "v1.0.4");
+        var legacyKeyPath = Path.Combine(
+            appRoot,
+            "releases",
+            "v1.0.1",
+            "App_Data",
+            "Production");
+        var archivedKeyPath = Path.Combine(
+            primaryKeyPath,
+            "legacy-data-protection-keys",
+            "v1.0.0",
+            "App_Data",
+            "Production");
+
+        try
+        {
+            Directory.CreateDirectory(primaryKeyPath);
+            Directory.CreateDirectory(currentRelease);
+            Directory.CreateDirectory(legacyKeyPath);
+            Directory.CreateDirectory(archivedKeyPath);
+            File.WriteAllText(
+                Path.Combine(legacyKeyPath, "key-test.xml"),
+                "test key location marker");
+            File.WriteAllText(
+                Path.Combine(archivedKeyPath, "key-archived.xml"),
+                "test archived key location marker");
+
+            var keyDirectories = LegacyPlaidAccessTokenProtector
+                .LoadKeyDirectories(primaryKeyPath, currentRelease);
+
+            Assert.Contains(Path.GetFullPath(primaryKeyPath), keyDirectories);
+            Assert.Contains(Path.GetFullPath(legacyKeyPath), keyDirectories);
+            Assert.Contains(Path.GetFullPath(archivedKeyPath), keyDirectories);
+        }
+        finally
+        {
+            if (Directory.Exists(appRoot))
+            {
+                Directory.Delete(appRoot, recursive: true);
             }
         }
     }

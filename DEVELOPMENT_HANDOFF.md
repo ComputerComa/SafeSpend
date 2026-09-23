@@ -20,7 +20,7 @@ The current flow is:
 6. The dashboard displays the connected account balance, persisted recent transactions, and the cash-flow forecast.
 7. `/Setup` contains the Plaid connection entry point, paycheck schedule, and bill schedule forms.
 8. If Identity has no users, `/Account/Setup` creates the first user and assigns the Administrator role. Once that user exists, setup redirects to login and there is no registration endpoint.
-9. The Plaid access token is protected with ASP.NET Data Protection and stored in the user-keyed `PlaidConnections` table. Data Protection keys are kept under ignored `App_Data` files so the connection survives application restarts on the same machine.
+9. The Plaid access token is protected with ASP.NET Data Protection and stored in the user-keyed `PlaidConnections` table. Development keys are kept under ignored `App_Data` files; deployed keys are kept in the configured persistent data directory (normally `/var/lib/safespend`).
 10. Disconnecting a bank calls Plaid Item removal, deletes the protected local connection, and deletes that Item's stored transactions and cursor.
 11. `appsettings.Production.json` disables detailed errors and EF command logging, restricts allowed hosts to local addresses, and the application refuses Production startup unless Plaid is configured for Production.
 12. Production uses `App_Data/Production` for its Identity database, application database, and Data Protection keys, keeping the existing Sandbox files under `App_Data` separate.
@@ -28,7 +28,8 @@ The current flow is:
 14. `/api/plaid/webhook` verifies Plaid's `Plaid-Verification` ES256 signature and body hash using `/webhook_verification_key/get`. Transaction update webhooks queue a sync; Item recovery webhooks persist a non-secret `ActionRequired` status. Plaid Link uses update mode for an existing connection so the user can repair it.
 15. `.github/workflows/release.yml` publishes a versioned application ZIP and a `SafeSpend-latest.zip` asset on `v*` tag pushes. The root `install.sh` is a curl-pipe bootstrap; `deploy/` contains the systemd unit, persistent-data configuration, checksum-verified updater, and automatic rollback.
 16. Both SQLite databases now use checked-in EF Core migrations. On the first upgraded startup, a complete database created by the old `EnsureCreated` workflow is adopted as the initial migration without changing or deleting its data. Fresh databases are created by migrations, and later migrations are applied automatically before the web host starts.
-17. Data Protection uses the stable application name `SafeSpend`. The updater records old release-directory discriminators so a token encrypted by a previous path-based deployment can be unlocked once and immediately re-encrypted under the stable name.
+17. Data Protection uses the stable application name `SafeSpend`. The updater records old release-directory discriminators and archives release-local key rings under persistent storage. Token recovery tries retained and archived key directories, then immediately re-encrypts a recovered token under the stable name. If the required key no longer exists, the Plaid connection page provides an explicit local reset and reconnect flow instead of crashing the dashboard or setup page.
+18. Tagged release packages contain a `VERSION` file and embed the tag and commit in the assembly. The updater installs into tag-named directories, reports the resolved tag and commit, supports `--version` and non-secret `--diagnose` output, preserves customized systemd units by default, and rolls back a service that does not remain healthy.
 
 ## Important implementation locations
 
@@ -50,7 +51,7 @@ The current flow is:
 - `SafeSpend.Web/Pages/Setup.cshtml` and `Setup.cshtml.cs`: Plaid setup entry point, paycheck schedule, and bill schedule management.
 - `SafeSpend.Web/Pages/Account/`: Login, one-time administrator setup, logout, and access-denied pages.
 - `SafeSpend.Web/Services/Identity/`: Identity user, Identity database, setup service, and database initialization.
-- `SafeSpend.Web/Pages/Shared/_Layout.cshtml`: Authenticated user indicator and sign-out form.
+- `SafeSpend.Web/Pages/Shared/_Layout.cshtml`: Authenticated user indicator, sign-out form, and embedded application version.
 - `.github/workflows/release.yml`: Release build, test, publish, ZIP, checksum, and GitHub Release workflow.
 - `deploy/`: LXC installation, systemd, persistent data, and Arr-style update scripts.
 
@@ -58,7 +59,7 @@ The local SQLite database is `SafeSpend.Web/App_Data/safespend.db`. The `App_Dat
 
 ## Tests and validation
 
-The current test suite contains 20 passing tests covering:
+The current test suite contains 22 passing tests covering:
 
 - Plaid account filtering and mapping.
 - Multi-page transaction sync and cursor persistence.
@@ -71,13 +72,15 @@ The current test suite contains 20 passing tests covering:
 - First-user administrator creation and registration shutdown after setup.
 - Plaid webhook signature verification, transaction sync queueing, and Item recovery status.
 - Fresh EF Core migration-based database creation, safe legacy database adoption, data preservation, and rejection of incomplete legacy schemas.
-- Recovery and re-encryption of a Plaid token protected with a legacy release-path Data Protection discriminator.
+- Recovery and re-encryption of a Plaid token protected with a legacy release-path Data Protection discriminator and a separate legacy key ring.
+- Discovery of retained and archived legacy Data Protection key directories.
+- Safe removal of an unrecoverable local Plaid connection without attempting a remote Plaid call with an unavailable token.
 
 Validated commands:
 
 ```text
 dotnet build SafeSpend.slnx                         # passes
-dotnet test SafeSpend.slnx                          # 20 passed
+dotnet test SafeSpend.slnx                          # 22 passed
 git diff --check                                    # passes
 ```
 
